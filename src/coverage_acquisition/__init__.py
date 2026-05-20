@@ -5,7 +5,12 @@ from coverage_acquisition.models import BoundingBox, FetchAreaRequest
 from coverage_acquisition.notebook import bbox_from_preset, fetch_multi_source_coverage, fetch_single_source
 from coverage_acquisition.providers import DEFAULT_MULTI_SOURCE_PROVIDERS, PROVIDERS
 from coverage_acquisition.runners import build_jobs, fetch_provider_coverage
-from coverage_acquisition.visualization import load_result_from_manifest, load_results_from_manifest_paths, plot_multi_provider_comparison, summarize_results
+from coverage_acquisition.visualization import (
+    load_result_from_manifest,
+    load_results_from_manifest_paths,
+    plot_multi_provider_comparison,
+    summarize_results,
+)
 
 __all__ = [
     "BoundingBox",

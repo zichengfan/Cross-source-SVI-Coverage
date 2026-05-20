@@ -1,26 +1,33 @@
 from __future__ import annotations
 
-import csv
-import io
 import json
 import re
-import shutil
-import subprocess
-import tempfile
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-import numpy as np
-from PIL import Image
-
 from coverage_acquisition.geo import iter_tile_coords, select_subboxes, split_bbox_into_grid, tile_range_for_bbox
-from coverage_acquisition.io_utils import ensure_directory, maybe_gzip_decompress, read_csv_rows, sha256_bytes, suffix_for_content_type, utc_now_iso, write_csv, write_json
-from coverage_acquisition.models import FetchAreaRequest, ProviderDefinition, SourceDefinition, TileCoordinate
-from coverage_acquisition.mvt_decoder import decode_tile, feature_rows_from_decoded_tile
+from coverage_acquisition.io_utils import (
+    ensure_directory,
+    read_csv_rows,
+    sha256_bytes,
+    utc_now_iso,
+    write_csv,
+    write_json,
+)
+from coverage_acquisition.models import FetchAreaRequest, ProviderDefinition, SourceDefinition
+from coverage_acquisition.polite import PolitePolicy, polite_fetch
 from coverage_acquisition.providers import get_provider
+from coverage_acquisition.source_kinds import DecodeContext, get_source_kind_handler
 
+# Backwards-compatible re-exports: these decoders moved into source_kinds/.
+from coverage_acquisition.source_kinds.raster import summarize_png  # noqa: F401
+from coverage_acquisition.source_kinds.vector_mvt import (  # noqa: F401
+    extract_vector_records,
+    guess_geometry_type_from_wkt,
+    inspect_vector_layers,
+)
 
 TILE_SUMMARY_FIELDS = [
     "provider",
@@ -250,110 +257,22 @@ def _fetch_job(provider: ProviderDefinition, source: SourceDefinition, job: dict
             continue
 
         fetched_at = utc_now_iso()
-        wire_payload = payload
-        stored_payload = payload
-        was_gzip_compressed = False
-        is_empty = ""
-        width = ""
-        height = ""
-        coverage_pixel_count = ""
-        total_pixel_count = ""
-        coverage_ratio = ""
-        record_count = ""
-        pano_count = ""
-        feature_count = ""
-        layer_counts_json = ""
-        last_modified = ""
-        tile_path: Path | None = None
+        context = DecodeContext(
+            source=source,
+            provider=provider,
+            job=job,
+            x=x,
+            y=y,
+            tile_url=tile_url,
+            fetched_at=fetched_at,
+            output_dir=output_dir,
+            wire_payload=payload,
+            content_type=content_type,
+            http_status=http_status,
+        )
 
         try:
-            if source.kind == "raster":
-                if _is_yandex_stv_source(source) and (http_status == 204 or not payload):
-                    is_empty = True
-                    stored_payload = b""
-                elif source.expect_content_type_prefix and not content_type.startswith(source.expect_content_type_prefix):
-                    skipped_tiles.append(
-                        {
-                            "provider": provider.key,
-                            "source_id": source.id,
-                            "source_kind": source.kind,
-                            "display_zoom": job["display_zoom"],
-                            "source_zoom": job["source_zoom"],
-                            "x": x,
-                            "y": y,
-                            "tile_url": tile_url,
-                            "fetched_at": fetched_at,
-                            "content_type": content_type,
-                        }
-                    )
-                    continue
-                else:
-                    png_summary = summarize_png(payload)
-                    width = png_summary["width"]
-                    height = png_summary["height"]
-                    coverage_pixel_count = png_summary["coverage_pixel_count"]
-                    total_pixel_count = png_summary["total_pixel_count"]
-                    coverage_ratio = png_summary["coverage_ratio"]
-                    is_empty = bool(_is_yandex_stv_source(source) and coverage_pixel_count == 0)
-
-                if is_empty is not True:
-                    suffix = suffix_for_content_type(content_type, tile_url, default=".png")
-                    tile_path = output_dir / source.effective_storage_subdir / str(job["source_zoom"]) / str(x) / f"{y}{suffix}"
-                    ensure_directory(tile_path.parent)
-                    tile_path.write_bytes(payload)
-                else:
-                    tile_path = None
-            elif source.kind == "vector_mvt":
-                stored_payload, was_gzip_compressed = maybe_gzip_decompress(wire_payload)
-                tile_path = output_dir / source.effective_storage_subdir / str(job["source_zoom"]) / str(x) / f"{y}.mvt"
-                ensure_directory(tile_path.parent)
-                tile_path.write_bytes(stored_payload)
-                tile_records, layer_counts = extract_vector_records(
-                    tile_path=tile_path,
-                    payload=stored_payload,
-                    source=source,
-                    provider=provider,
-                    job=job,
-                    x=x,
-                    y=y,
-                    tile_url=tile_url,
-                    fetched_at=fetched_at,
-                )
-                vector_feature_records.extend(tile_records)
-                feature_count = len(tile_records)
-                record_count = feature_count
-                layer_counts_json = json.dumps(layer_counts, sort_keys=True)
-            elif source.kind == "coverage_json":
-                stored_payload, was_gzip_compressed = maybe_gzip_decompress(wire_payload)
-                tile_json = json.loads(stored_payload.decode("utf-8"))
-                tile_path = output_dir / source.effective_storage_subdir / str(job["source_zoom"]) / str(x) / f"{y}.json"
-                ensure_directory(tile_path.parent)
-                tile_path.write_text(json.dumps(tile_json, indent=2, sort_keys=True), encoding="utf-8")
-                last_modified = tile_json.get("lastModified", "")
-                pano_count = len(tile_json.get("panos", []))
-                record_count = pano_count
-                for pano in tile_json.get("panos", []):
-                    pano_records.append(
-                        {
-                            "provider": provider.key,
-                            "source_id": source.id,
-                            "display_zoom": job["display_zoom"],
-                            "source_zoom": job["source_zoom"],
-                            "tile_x": x,
-                            "tile_y": y,
-                            "tile_url": tile_url,
-                            "panoid": pano.get("panoid", ""),
-                            "lat": pano.get("lat", ""),
-                            "lon": pano.get("lon", ""),
-                            "timestamp": pano.get("timestamp", ""),
-                            "buildId": pano.get("buildId", ""),
-                            "coverageType": pano.get("coverageType", ""),
-                            "lastModified": last_modified,
-                            "fetched_at": fetched_at,
-                        }
-                    )
-            else:
-                raise ValueError(f"Unsupported source kind: {source.kind}")
+            decoded = get_source_kind_handler(source.kind)(context)
         except Exception as exc:
             error_record = _build_error_record(provider, source, job, tile_url, x, y, None, str(exc))
             error_tiles.append(error_record)
@@ -361,8 +280,23 @@ def _fetch_job(provider: ProviderDefinition, source: SourceDefinition, job: dict
                 raise
             continue
 
+        if decoded.skipped:
+            if decoded.skip_record is not None:
+                skipped_tiles.append(decoded.skip_record)
+            continue
+
+        pano_records.extend(decoded.pano_records)
+        vector_feature_records.extend(decoded.vector_feature_records)
+        tile_path = decoded.tile_path
+
         if tile_path is None:
-            metadata_path = output_dir / source.effective_storage_subdir / str(job["source_zoom"]) / str(x) / f"{y}.png.metadata.json"
+            metadata_path = (
+                output_dir
+                / source.effective_storage_subdir
+                / str(job["source_zoom"])
+                / str(x)
+                / f"{y}.png.metadata.json"
+            )
         else:
             metadata_path = Path(str(tile_path) + ".metadata.json")
         row = {
@@ -376,22 +310,22 @@ def _fetch_job(provider: ProviderDefinition, source: SourceDefinition, job: dict
             "tile_url": tile_url,
             "http_status": http_status,
             "content_type": content_type,
-            "is_empty": is_empty,
-            "wire_byte_length": len(wire_payload),
-            "stored_byte_length": len(stored_payload),
-            "wire_sha256": sha256_bytes(wire_payload),
-            "stored_sha256": sha256_bytes(stored_payload),
-            "was_gzip_compressed": was_gzip_compressed,
-            "width": width,
-            "height": height,
-            "coverage_pixel_count": coverage_pixel_count,
-            "total_pixel_count": total_pixel_count,
-            "coverage_ratio": coverage_ratio,
-            "record_count": record_count,
-            "pano_count": pano_count,
-            "feature_count": feature_count,
-            "layer_counts_json": layer_counts_json,
-            "last_modified": last_modified,
+            "is_empty": decoded.is_empty,
+            "wire_byte_length": len(payload),
+            "stored_byte_length": len(decoded.stored_payload),
+            "wire_sha256": sha256_bytes(payload),
+            "stored_sha256": sha256_bytes(decoded.stored_payload),
+            "was_gzip_compressed": decoded.was_gzip_compressed,
+            "width": decoded.width,
+            "height": decoded.height,
+            "coverage_pixel_count": decoded.coverage_pixel_count,
+            "total_pixel_count": decoded.total_pixel_count,
+            "coverage_ratio": decoded.coverage_ratio,
+            "record_count": decoded.record_count,
+            "pano_count": decoded.pano_count,
+            "feature_count": decoded.feature_count,
+            "layer_counts_json": decoded.layer_counts_json,
+            "last_modified": decoded.last_modified,
             "output_path": str(tile_path) if tile_path is not None else "",
             "metadata_path": str(metadata_path),
             "fetched_at": fetched_at,
@@ -406,8 +340,12 @@ def _fetch_job(provider: ProviderDefinition, source: SourceDefinition, job: dict
     write_csv(pano_records_path, pano_records, PANO_RECORD_FIELDS)
     write_csv(vector_feature_records_path, vector_feature_records, VECTOR_FEATURE_FIELDS)
 
-    total_coverage_pixels = sum(int(row["coverage_pixel_count"]) for row in fetched_tiles if row["coverage_pixel_count"] != "")
-    total_pixels = sum(int(row["total_pixel_count"]) for row in fetched_tiles if row["total_pixel_count"] != "")
+    total_coverage_pixels = sum(
+        int(row["coverage_pixel_count"]) for row in fetched_tiles if row["coverage_pixel_count"] != ""
+    )
+    total_pixels = sum(
+        int(row["total_pixel_count"]) for row in fetched_tiles if row["total_pixel_count"] != ""
+    )
     aggregate_coverage_ratio = total_coverage_pixels / total_pixels if total_pixels else None
     empty_tile_count = sum(1 for row in fetched_tiles if row.get("is_empty") is True)
     nonempty_tile_count = sum(1 for row in fetched_tiles if row.get("is_empty") is False)
@@ -578,145 +516,8 @@ def _build_tile_url(
 
 
 def _fetch_payload(url: str, headers: dict[str, str], timeout_seconds: int) -> tuple[bytes, str, int]:
-    request = Request(url, headers=headers)
-    with urlopen(request, timeout=timeout_seconds) as response:
-        return response.read(), response.headers.get("Content-Type", ""), response.status
-
-
-def summarize_png(payload: bytes) -> dict[str, float | int]:
-    with Image.open(io.BytesIO(payload)) as image:
-        rgba = np.array(image.convert("RGBA"))
-
-    alpha = rgba[:, :, 3]
-    coverage_pixel_count = int(np.count_nonzero(alpha))
-    total_pixel_count = int(alpha.size)
-    coverage_ratio = coverage_pixel_count / total_pixel_count if total_pixel_count else 0.0
-
-    return {
-        "width": int(rgba.shape[1]),
-        "height": int(rgba.shape[0]),
-        "coverage_pixel_count": coverage_pixel_count,
-        "total_pixel_count": total_pixel_count,
-        "coverage_ratio": coverage_ratio,
-    }
-
-
-def extract_vector_records(
-    *,
-    tile_path: Path,
-    payload: bytes,
-    source: SourceDefinition,
-    provider: ProviderDefinition,
-    job: dict,
-    x: int,
-    y: int,
-    tile_url: str,
-    fetched_at: str,
-) -> tuple[list[dict], dict[str, int]]:
-    if source.vector_decoder == "custom_mvt":
-        decoded_tile = decode_tile(payload)
-        return feature_rows_from_decoded_tile(
-            decoded_tile=decoded_tile,
-            provider=provider.key,
-            source_id=source.id,
-            display_zoom=job["display_zoom"],
-            source_zoom=job["source_zoom"],
-            tile_x=x,
-            tile_y=y,
-            tile_url=tile_url,
-            fetched_at=fetched_at,
-        )
-
-    ogr2ogr_path = shutil.which("ogr2ogr")
-    if not ogr2ogr_path:
-        raise RuntimeError("ogr2ogr is required to decode vector MVT tiles into feature records.")
-
-    layer_names = source.layer_names or tuple(inspect_vector_layers(tile_path))
-    all_records = []
-    layer_counts: dict[str, int] = {}
-
-    for layer_name in layer_names:
-        rows = _extract_single_layer_rows(ogr2ogr_path=ogr2ogr_path, tile_path=tile_path, layer_name=layer_name)
-        layer_counts[layer_name] = len(rows)
-        for feature_index, row in enumerate(rows):
-            geometry_wkt = row.pop("WKT", "")
-            mvt_id = row.get("mvt_id", "")
-            all_records.append(
-                {
-                    "provider": provider.key,
-                    "source_id": source.id,
-                    "display_zoom": job["display_zoom"],
-                    "source_zoom": job["source_zoom"],
-                    "tile_x": x,
-                    "tile_y": y,
-                    "tile_url": tile_url,
-                    "layer_name": layer_name,
-                    "feature_index": feature_index,
-                    "mvt_id": mvt_id,
-                    "geometry_type": guess_geometry_type_from_wkt(geometry_wkt),
-                    "properties_json": json.dumps(row, sort_keys=True),
-                    "geometry_wkt": geometry_wkt,
-                    "fetched_at": fetched_at,
-                }
-            )
-
-    return all_records, layer_counts
-
-
-def inspect_vector_layers(tile_path: Path) -> list[str]:
-    ogrinfo_path = shutil.which("ogrinfo")
-    if not ogrinfo_path:
-        raise RuntimeError("ogrinfo is required when vector layer names are not preconfigured.")
-
-    command = [ogrinfo_path, "-ro", "-so", str(tile_path)]
-    result = subprocess.run(command, check=True, capture_output=True, text=True)
-    layers = []
-    for line in result.stdout.splitlines():
-        if ": " in line and line[:1].isdigit():
-            _, tail = line.split(": ", 1)
-            layers.append(tail.split(" (", 1)[0].strip())
-    return layers
-
-
-def _extract_single_layer_rows(*, ogr2ogr_path: str, tile_path: Path, layer_name: str) -> list[dict]:
-    with tempfile.TemporaryDirectory() as tmpdir:
-        csv_path = Path(tmpdir) / f"{layer_name}.csv"
-        command = [
-            ogr2ogr_path,
-            "-f",
-            "CSV",
-            str(csv_path),
-            str(tile_path),
-            layer_name,
-            "-lco",
-            "GEOMETRY=AS_WKT",
-            "-t_srs",
-            "EPSG:4326",
-        ]
-        try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as exc:
-            detail = (exc.stderr or "").strip() or (exc.stdout or "").strip() or repr(exc)
-            raise RuntimeError(f"ogr2ogr failed for {tile_path.name} layer {layer_name}: {detail}") from exc
-        if not csv_path.exists():
-            return []
-        with csv_path.open("r", newline="", encoding="utf-8") as handle:
-            return list(csv.DictReader(handle))
-
-
-def guess_geometry_type_from_wkt(wkt: str) -> str:
-    if not wkt:
-        return "Unknown"
-    prefix = wkt.strip().split("(", 1)[0].strip().upper()
-    mapping = {
-        "POINT": "Point",
-        "MULTIPOINT": "MultiPoint",
-        "LINESTRING": "LineString",
-        "MULTILINESTRING": "MultiLineString",
-        "POLYGON": "Polygon",
-        "MULTIPOLYGON": "MultiPolygon",
-    }
-    return mapping.get(prefix, prefix.title())
+    """Fetch one tile through the polite scraper (per-host throttle + retry)."""
+    return polite_fetch(url, headers=headers, policy=PolitePolicy(timeout_seconds=timeout_seconds))
 
 
 def _build_error_record(

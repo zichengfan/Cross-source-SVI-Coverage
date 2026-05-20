@@ -8,12 +8,20 @@ from pathlib import Path
 from coverage_acquisition.compare import summarize_manifest_paths
 from coverage_acquisition.downloaders import download_file, fetch_raster_tiles
 from coverage_acquisition.models import BoundingBox, FetchAreaRequest, TileFetchRequest
-from coverage_acquisition.providers import DEFAULT_MULTI_SOURCE_PROVIDERS, DIRECT_DOWNLOADS, FRONTEND_NOTES, PROVIDERS, get_area_preset
+from coverage_acquisition.providers import (
+    DEFAULT_MULTI_SOURCE_PROVIDERS,
+    DIRECT_DOWNLOADS,
+    FRONTEND_NOTES,
+    PROVIDERS,
+    get_area_preset,
+)
 from coverage_acquisition.runners import fetch_provider_coverage
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Acquisition helpers for multi-source street-view coverage experiments.")
+    parser = argparse.ArgumentParser(
+        description="Acquisition helpers for multi-source street-view coverage experiments."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("list-providers", help="List registered provider fetchers.")
@@ -22,7 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     download_parser.add_argument("--provider", required=True, choices=sorted(DIRECT_DOWNLOADS.keys()))
     download_parser.add_argument("--output-root", required=True, type=Path)
 
-    raster_parser = subparsers.add_parser("fetch-raster-tiles", help="Fetch a small xyz tile range for a raw raster layer.")
+    raster_parser = subparsers.add_parser(
+        "fetch-raster-tiles", help="Fetch a small xyz tile range for a raw raster layer."
+    )
     raster_parser.add_argument("--provider", required=True)
     raster_parser.add_argument("--template", required=True)
     raster_parser.add_argument("--zoom", required=True, type=int)
@@ -33,7 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     raster_parser.add_argument("--output-root", required=True, type=Path)
     raster_parser.add_argument("--header", action="append", default=[], help="Optional HTTP header in KEY=VALUE form.")
 
-    notes_parser = subparsers.add_parser("provider-notes", help="Print provider notes for restricted frontend acquisition.")
+    notes_parser = subparsers.add_parser(
+        "provider-notes", help="Print provider notes for restricted frontend acquisition."
+    )
     notes_parser.add_argument("--provider", required=True)
 
     fetch_provider_parser = subparsers.add_parser("fetch-provider", help="Fetch one provider over one bbox.")

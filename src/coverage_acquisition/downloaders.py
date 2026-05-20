@@ -3,9 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from coverage_acquisition.io_utils import ensure_directory, sha256_bytes, suffix_for_content_type, utc_now_iso, write_json
+from coverage_acquisition.io_utils import (
+    ensure_directory,
+    sha256_bytes,
+    suffix_for_content_type,
+    utc_now_iso,
+    write_json,
+)
 from coverage_acquisition.models import DownloadSource, TileCoordinate, TileFetchRequest
-
 
 USER_AGENT = "global-svi-coverage-observatory/0.2"
 

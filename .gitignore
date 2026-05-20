@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# uv / virtualenv (uv.lock IS tracked, for reproducible installs)
+.venv/
+
+# Environment / secrets
+.env
+.env.local
+
+# Data — scraped + intermediate artifacts are not tracked
+data/raw/
+data/intermediate/
+data/processed/**/*.tif
+!data/processed/.gitkeep
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+*.swp
