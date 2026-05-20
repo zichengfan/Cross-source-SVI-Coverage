@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from coverage_acquisition.models import ProviderDefinition, SourceDefinition
@@ -9,6 +12,7 @@ from coverage_acquisition.source_kinds import SOURCE_KIND_HANDLERS
 from coverage_acquisition.source_kinds._base import DecodeContext
 from coverage_acquisition.source_kinds.streetlevel import (
     STREETLEVEL_PROBES,
+    GlobalRateLimiter,
     ProbeBlockedError,
     RateLimitedProbe,
     get_streetlevel_probe,
@@ -57,6 +61,48 @@ def test_rate_limited_probe_spaces_calls(monkeypatch):
     limited = RateLimitedProbe(probe, requests_per_second=2.0, max_retries=0)
     limited(1.0, 2.0, 100.0)
     limited(1.0, 2.0, 100.0)
+
+    assert calls[1][3] - calls[0][3] >= 0.5
+    assert clock["slept"] == [0.5]
+
+
+def test_global_rate_limiter_bounds_total_rate_across_threads():
+    limiter = GlobalRateLimiter(requests_per_second=20.0)
+    started_at = time.monotonic()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(lambda _: limiter.acquire(), range(6)))
+
+    elapsed = time.monotonic() - started_at
+    assert elapsed >= 0.24
+    assert elapsed < 0.8
+
+
+def test_rate_limited_probe_uses_shared_global_limiter(monkeypatch):
+    clock = {"now": 100.0, "slept": []}
+
+    def fake_monotonic() -> float:
+        return clock["now"]
+
+    def fake_sleep(seconds: float) -> None:
+        clock["slept"].append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr("coverage_acquisition.source_kinds.streetlevel.time.monotonic", fake_monotonic)
+    monkeypatch.setattr("coverage_acquisition.source_kinds.streetlevel.time.sleep", fake_sleep)
+
+    calls = []
+
+    def probe(lat: float, lon: float, radius_m: float) -> list[dict]:
+        calls.append((lat, lon, radius_m, clock["now"]))
+        return []
+
+    shared_limiter = GlobalRateLimiter(requests_per_second=2.0)
+    first = RateLimitedProbe(probe, requests_per_second=1000.0, max_retries=0, limiter=shared_limiter)
+    second = RateLimitedProbe(probe, requests_per_second=1000.0, max_retries=0, limiter=shared_limiter)
+
+    first(1.0, 2.0, 100.0)
+    second(1.0, 2.0, 100.0)
 
     assert calls[1][3] - calls[0][3] >= 0.5
     assert clock["slept"] == [0.5]

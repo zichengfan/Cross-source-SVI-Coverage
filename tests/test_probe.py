@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 
+from coverage_acquisition.cli import build_parser
 from coverage_acquisition.io_utils import read_csv_rows
 from coverage_acquisition.models import BoundingBox, ProbeFetchRequest
 from coverage_acquisition.probe import fetch_probe_coverage, generate_probe_grid
@@ -83,6 +86,153 @@ def test_fetch_probe_coverage_two_pass_writes_outputs_and_dedupes(tmp_path):
     assert csv_rows[0]["panoid"] == "same"
     assert csv_rows[0]["provider"] == provider_key
     assert json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))["pano_count"] == 1
+
+
+def test_fetch_probe_coverage_concurrent_matches_serial_and_sorts_output(tmp_path):
+    def make_probe(call_order: list[tuple[float, float]]) -> object:
+        def probe(lat: float, lon: float, radius_m: float) -> list[dict]:
+            call_order.append((lat, lon))
+            time.sleep(0.01 if lon == 0.0 else 0.0)
+            return [
+                {"panoid": "z", "lat": lat, "lon": lon, "date": None, "raw": {"lon": lon}},
+                {"panoid": "a", "lat": lat, "lon": lon, "date": None, "raw": {"lon": lon}},
+                {"panoid": "z", "lat": lat, "lon": lon, "date": None, "raw": {"lon": lon}},
+            ]
+
+        return probe
+
+    serial_provider = "probe_serial_sorted"
+    concurrent_provider = "probe_concurrent_sorted"
+    serial_calls: list[tuple[float, float]] = []
+    concurrent_calls: list[tuple[float, float]] = []
+    _register_probe(serial_provider, make_probe(serial_calls))
+    _register_probe(concurrent_provider, make_probe(concurrent_calls))
+    bbox = BoundingBox(min_lon=0.0, min_lat=0.0, max_lon=0.01, max_lat=0.01)
+
+    serial_manifest = fetch_probe_coverage(
+        ProbeFetchRequest(
+            provider=serial_provider,
+            bbox=bbox,
+            output_root=tmp_path,
+            fine_spacing_m=1113.2,
+            requests_per_second=1000.0,
+            two_pass=False,
+            run_label="serial",
+            concurrency=1,
+        )
+    )
+    concurrent_manifest = fetch_probe_coverage(
+        ProbeFetchRequest(
+            provider=concurrent_provider,
+            bbox=bbox,
+            output_root=tmp_path,
+            fine_spacing_m=1113.2,
+            requests_per_second=1000.0,
+            two_pass=False,
+            run_label="concurrent",
+            concurrency=4,
+        )
+    )
+
+    assert serial_manifest["pano_count"] == concurrent_manifest["pano_count"] == 2
+    assert serial_manifest["fine_probe_count"] == concurrent_manifest["fine_probe_count"] == 4
+    serial_rows = read_csv_rows(Path(serial_manifest["pano_records_path"]))
+    concurrent_rows = read_csv_rows(Path(concurrent_manifest["pano_records_path"]))
+    assert [row["panoid"] for row in serial_rows] == ["a", "z"]
+    assert [row["panoid"] for row in concurrent_rows] == ["a", "z"]
+
+
+def test_fetch_probe_coverage_global_rate_cap_with_multiple_workers(tmp_path):
+    provider_key = "probe_global_rate_cap"
+    call_times: list[float] = []
+    call_lock = threading.Lock()
+
+    def probe(lat: float, lon: float, radius_m: float) -> list[dict]:
+        with call_lock:
+            call_times.append(time.monotonic())
+        time.sleep(0.01)
+        return []
+
+    _register_probe(provider_key, probe)
+    request = ProbeFetchRequest(
+        provider=provider_key,
+        bbox=BoundingBox(min_lon=0.0, min_lat=0.0, max_lon=0.01, max_lat=0.01),
+        output_root=tmp_path,
+        fine_spacing_m=1113.2,
+        requests_per_second=20.0,
+        two_pass=False,
+        run_label="rate",
+        concurrency=4,
+    )
+
+    manifest = fetch_probe_coverage(request)
+
+    assert manifest["fine_probe_count"] == 4
+    assert len(call_times) == 4
+    assert max(call_times) - min(call_times) >= 0.14
+
+
+def test_fetch_probe_coverage_mask_skips_outside_points_before_probe(tmp_path):
+    provider_key = "probe_masked"
+    calls: list[tuple[float, float]] = []
+
+    def probe(lat: float, lon: float, radius_m: float) -> list[dict]:
+        calls.append((lat, lon))
+        return [{"panoid": f"{lat:.2f},{lon:.2f}", "lat": lat, "lon": lon, "date": None, "raw": {}}]
+
+    _register_probe(provider_key, probe)
+    request = ProbeFetchRequest(
+        provider=provider_key,
+        bbox=BoundingBox(min_lon=0.0, min_lat=0.0, max_lon=0.02, max_lat=0.02),
+        output_root=tmp_path,
+        fine_spacing_m=1113.2,
+        requests_per_second=1000.0,
+        two_pass=False,
+        run_label="masked",
+        mask_path=Path(__file__).parent / "fixtures" / "probe_mask.geojson",
+        concurrency=3,
+    )
+
+    manifest = fetch_probe_coverage(request)
+
+    assert manifest["fine_probe_count"] == 1
+    assert len(calls) == 1
+    assert calls[0][0] == 0.01
+    assert abs(calls[0][1] - 0.01) < 1.0e-9
+    assert manifest["pano_count"] == 1
+
+
+def test_fetch_probe_cli_wires_mask_and_concurrency(tmp_path):
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "fetch-probe",
+            "--provider",
+            "probe_cli",
+            "--output-root",
+            str(tmp_path),
+            "--bbox",
+            "0",
+            "0",
+            "1",
+            "1",
+            "--mask",
+            str(tmp_path / "mask.geojson"),
+            "--concurrency",
+            "5",
+        ]
+    )
+
+    request = ProbeFetchRequest(
+        provider=args.provider,
+        bbox=BoundingBox.from_sequence(args.bbox),
+        output_root=args.output_root,
+        mask_path=args.mask,
+        concurrency=args.concurrency,
+    )
+
+    assert request.mask_path == tmp_path / "mask.geojson"
+    assert request.concurrency == 5
 
 
 def test_fetch_probe_coverage_dry_run_does_not_call_probe(tmp_path):

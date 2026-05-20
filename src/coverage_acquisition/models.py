@@ -164,6 +164,8 @@ class ProbeFetchRequest:
     fine_spacing_m: float = 150.0
     radius_m: float = 100.0
     requests_per_second: float = 1.0
+    mask_path: Path | None = None
+    concurrency: int = 8
     two_pass: bool = True
     run_label: str | None = None
     dry_run: bool = False

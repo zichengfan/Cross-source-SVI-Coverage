@@ -62,6 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_probe_parser.add_argument("--fine-spacing", type=float, default=150.0)
     fetch_probe_parser.add_argument("--radius", type=float, default=100.0)
     fetch_probe_parser.add_argument("--requests-per-second", type=float, default=1.0)
+    fetch_probe_parser.add_argument("--mask", type=Path)
+    fetch_probe_parser.add_argument("--concurrency", type=int, default=8)
     fetch_probe_parser.add_argument("--single-pass", action="store_true")
     fetch_probe_parser.add_argument("--run-label")
     fetch_probe_parser.add_argument("--dry-run", action="store_true")
@@ -220,6 +222,8 @@ def main() -> None:
             fine_spacing_m=args.fine_spacing,
             radius_m=args.radius,
             requests_per_second=args.requests_per_second,
+            mask_path=args.mask,
+            concurrency=args.concurrency,
             two_pass=not args.single_pass,
             run_label=args.run_label,
             dry_run=args.dry_run,

@@ -17,6 +17,28 @@ class ProbeBlockedError(RuntimeError):
     """Raised when a streetlevel probe endpoint is blocked or returns undecodable data."""
 
 
+class GlobalRateLimiter:
+    """Thread-safe global request-rate limiter shared by probe workers."""
+
+    def __init__(self, requests_per_second: float) -> None:
+        if requests_per_second <= 0:
+            raise ValueError("requests_per_second must be positive.")
+        self._min_interval_seconds = 1.0 / requests_per_second
+        self._last_request: float | None = None
+        self._lock = Lock()
+
+    def acquire(self) -> None:
+        """Block until the next global request slot is available."""
+        with self._lock:
+            now = time.monotonic()
+            if self._last_request is not None:
+                elapsed = now - self._last_request
+                if elapsed < self._min_interval_seconds:
+                    time.sleep(self._min_interval_seconds - elapsed)
+                    now = time.monotonic()
+            self._last_request = now
+
+
 def register_streetlevel_probe(provider_key: str, probe: StreetlevelProbe) -> None:
     """Register a provider-specific point probe."""
     if provider_key in STREETLEVEL_PROBES:
@@ -42,17 +64,16 @@ class RateLimitedProbe:
         requests_per_second: float,
         max_retries: int = 3,
         backoff_base_seconds: float = 1.0,
+        limiter: GlobalRateLimiter | None = None,
     ) -> None:
         if requests_per_second <= 0:
             raise ValueError("requests_per_second must be positive.")
         if max_retries < 0:
             raise ValueError("max_retries must be non-negative.")
         self._probe = probe
-        self._min_interval_seconds = 1.0 / requests_per_second
+        self._limiter = limiter or GlobalRateLimiter(requests_per_second)
         self._max_retries = max_retries
         self._backoff_base_seconds = backoff_base_seconds
-        self._last_request: float | None = None
-        self._lock = Lock()
 
     def __call__(self, lat: float, lon: float, radius_m: float) -> list[dict]:
         last_error: Exception | None = None
@@ -70,14 +91,7 @@ class RateLimitedProbe:
         raise last_error if last_error is not None else RuntimeError("Streetlevel probe failed.")
 
     def _wait_for_slot(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            if self._last_request is not None:
-                elapsed = now - self._last_request
-                if elapsed < self._min_interval_seconds:
-                    time.sleep(self._min_interval_seconds - elapsed)
-                    now = time.monotonic()
-            self._last_request = now
+        self._limiter.acquire()
 
 
 def decode_streetlevel(_ctx: DecodeContext) -> DecodeResult:

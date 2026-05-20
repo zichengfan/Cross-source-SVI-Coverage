@@ -5,14 +5,22 @@ from __future__ import annotations
 import json
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
 
 import geopandas as gpd
 from shapely.geometry import Point
+from shapely.prepared import prep
 
 from coverage_acquisition.io_utils import ensure_directory, utc_now_iso, write_csv, write_json
 from coverage_acquisition.models import BoundingBox, ProbeFetchRequest
-from coverage_acquisition.source_kinds.streetlevel import ProbeBlockedError, RateLimitedProbe, get_streetlevel_probe
+from coverage_acquisition.source_kinds.streetlevel import (
+    GlobalRateLimiter,
+    ProbeBlockedError,
+    RateLimitedProbe,
+    get_streetlevel_probe,
+)
 
 PROBE_PANO_RECORD_FIELDS = [
     "provider",
@@ -103,12 +111,17 @@ def coarse_cells_with_hits(
 
 def fetch_probe_coverage(request: ProbeFetchRequest) -> dict:
     """Fetch streetlevel coverage with a two-pass point-probe sweep."""
+    if request.concurrency < 1:
+        raise ValueError("concurrency must be at least 1.")
+    mask = _load_probe_mask(request.mask_path)
+    limiter = GlobalRateLimiter(request.requests_per_second)
     probe = RateLimitedProbe(
         get_streetlevel_probe(request.provider),
         requests_per_second=request.requests_per_second,
+        limiter=limiter,
     )
-    coarse_grid = generate_probe_grid(request.bbox, request.coarse_spacing_m)
-    fine_grid = generate_probe_grid(request.bbox, request.fine_spacing_m)
+    coarse_grid = _filter_points_by_mask(generate_probe_grid(request.bbox, request.coarse_spacing_m), mask)
+    fine_grid = _filter_points_by_mask(generate_probe_grid(request.bbox, request.fine_spacing_m), mask)
     run_label = request.run_label or utc_now_iso().replace(":", "").replace("+", "Z")
     output_dir = request.output_root / f"{request.provider}_streetlevel" / run_label
 
@@ -121,6 +134,9 @@ def fetch_probe_coverage(request: ProbeFetchRequest) -> dict:
             "coarse_spacing_m": request.coarse_spacing_m,
             "fine_spacing_m": request.fine_spacing_m,
             "radius_m": request.radius_m,
+            "requests_per_second": request.requests_per_second,
+            "mask_path": str(request.mask_path) if request.mask_path else None,
+            "concurrency": request.concurrency,
             "coarse_grid_size": len(coarse_grid),
             "estimated_pass2_grid_size": len(fine_grid),
         }
@@ -132,32 +148,48 @@ def fetch_probe_coverage(request: ProbeFetchRequest) -> dict:
     hit_count = 0
     blocked_count = 0
     all_panos: list[dict] = []
+    current_phase = "coarse"
 
     try:
         if request.two_pass:
-            for lat, lon in coarse_grid:
-                panos = probe(lat, lon, request.radius_m)
-                coarse_probe_count += 1
-                if panos:
-                    hit_count += 1
-                    all_panos.extend(panos)
+            current_phase = "coarse"
+            coarse_result = _probe_points(
+                probe=probe,
+                points=coarse_grid,
+                radius_m=request.radius_m,
+                concurrency=request.concurrency,
+            )
+            coarse_probe_count += coarse_result.probe_count
+            hit_count += coarse_result.hit_count
+            all_panos.extend(coarse_result.panos)
             hit_cells = coarse_cells_with_hits(request.bbox, request.coarse_spacing_m, all_panos)
             pass2_points = _dedupe_points(
                 point
                 for cell in hit_cells
                 for point in generate_probe_grid(cell, request.fine_spacing_m)
             )
+            pass2_points = _filter_points_by_mask(pass2_points, mask)
         else:
             hit_cells = [request.bbox]
             pass2_points = fine_grid
 
-        for lat, lon in pass2_points:
-            panos = probe(lat, lon, request.radius_m)
-            fine_probe_count += 1
-            if panos:
-                hit_count += 1
-                all_panos.extend(panos)
-    except ProbeBlockedError as exc:
+        current_phase = "fine"
+        fine_result = _probe_points(
+            probe=probe,
+            points=pass2_points,
+            radius_m=request.radius_m,
+            concurrency=request.concurrency,
+        )
+        fine_probe_count += fine_result.probe_count
+        hit_count += fine_result.hit_count
+        all_panos.extend(fine_result.panos)
+    except _ProbeRunBlocked as exc:
+        if current_phase == "coarse":
+            coarse_probe_count += exc.probe_count
+        else:
+            fine_probe_count += exc.probe_count
+        hit_count += exc.hit_count
+        all_panos.extend(exc.panos)
         blocked_count += 1
         manifest = _base_manifest(
             request=request,
@@ -173,7 +205,7 @@ def fetch_probe_coverage(request: ProbeFetchRequest) -> dict:
             pano_count=0,
             elapsed_seconds=time.monotonic() - started_at,
         )
-        manifest.update({"blocked": True, "block_reason": str(exc)})
+        manifest.update({"blocked": True, "block_reason": str(exc.__cause__ or exc)})
         _write_manifest(output_dir, manifest)
         return manifest
 
@@ -251,7 +283,81 @@ def _dedupe_panos(panos: list[dict]) -> list[dict]:
     deduped: dict[str, dict] = {}
     for pano in panos:
         deduped.setdefault(str(pano["panoid"]), pano)
-    return list(deduped.values())
+    return [deduped[panoid] for panoid in sorted(deduped)]
+
+
+@dataclass(frozen=True)
+class _ProbeRunResult:
+    probe_count: int
+    hit_count: int
+    panos: list[dict]
+
+
+class _ProbeRunBlocked(Exception):
+    def __init__(self, cause: ProbeBlockedError, probe_count: int, hit_count: int, panos: list[dict]) -> None:
+        super().__init__(str(cause))
+        self.__cause__ = cause
+        self.probe_count = probe_count
+        self.hit_count = hit_count
+        self.panos = panos
+
+
+def _probe_points(
+    *,
+    probe: RateLimitedProbe,
+    points: list[tuple[float, float]],
+    radius_m: float,
+    concurrency: int,
+) -> _ProbeRunResult:
+    if not points:
+        return _ProbeRunResult(probe_count=0, hit_count=0, panos=[])
+
+    results: dict[int, list[dict]] = {}
+    probe_count = 0
+    hit_count = 0
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {
+            executor.submit(probe, lat, lon, radius_m): index
+            for index, (lat, lon) in enumerate(points)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            probe_count += 1
+            try:
+                panos = future.result()
+            except ProbeBlockedError as exc:
+                for pending in futures:
+                    pending.cancel()
+                raise _ProbeRunBlocked(exc, probe_count, hit_count, _ordered_panos(results)) from exc
+            if panos:
+                hit_count += 1
+                results[index] = panos
+
+    return _ProbeRunResult(probe_count=probe_count, hit_count=hit_count, panos=_ordered_panos(results))
+
+
+def _ordered_panos(results: dict[int, list[dict]]) -> list[dict]:
+    panos: list[dict] = []
+    for index in sorted(results):
+        panos.extend(results[index])
+    return panos
+
+
+def _load_probe_mask(mask_path: Path | None):
+    if mask_path is None:
+        return None
+    mask = gpd.read_file(mask_path)
+    if mask.crs is None:
+        mask = mask.set_crs("EPSG:4326")
+    else:
+        mask = mask.to_crs("EPSG:4326")
+    return prep(mask.geometry.union_all())
+
+
+def _filter_points_by_mask(points: list[tuple[float, float]], mask) -> list[tuple[float, float]]:
+    if mask is None:
+        return points
+    return [(lat, lon) for lat, lon in points if mask.contains(Point(lon, lat))]
 
 
 def _pano_to_row(provider: str, pano: dict, fetched_at: str) -> dict:
@@ -341,6 +447,8 @@ def _base_manifest(
         "fine_spacing_m": request.fine_spacing_m,
         "radius_m": request.radius_m,
         "requests_per_second": request.requests_per_second,
+        "mask_path": str(request.mask_path) if request.mask_path else None,
+        "concurrency": request.concurrency,
         "coarse_grid_size": coarse_grid_size,
         "estimated_pass2_grid_size": estimated_pass2_grid_size,
         "coarse_probe_count": coarse_probe_count,
