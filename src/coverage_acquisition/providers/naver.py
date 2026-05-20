@@ -18,9 +18,8 @@ from datetime import datetime
 from threading import Lock
 from typing import Any
 
-import streetlevel.naver as streetlevel_naver
-from streetlevel.naver.panorama import NaverPanorama, PanoramaType
-from streetlevel.naver.parse import parse_nearby, parse_neighbors
+import streetlevel.naver.api as naver_api
+from streetlevel.naver.panorama import NaverPanorama, Neighbors, PanoramaType
 
 from coverage_acquisition.models import BoundingBox, ProviderDefinition, SourceDefinition
 from coverage_acquisition.providers._registry import register_provider
@@ -123,7 +122,9 @@ def decode_nearby_payload(payload: dict[str, Any]) -> NaverDecodeResult:
 
     records = []
     for feature in features:
-        pano = parse_nearby({"type": payload.get("type", "FeatureCollection"), "features": [feature]})
+        pano = _parse_nearby_feature(feature)
+        if pano is None:
+            continue
         record = _record_from_pano(pano, raw_extra={"response_kind": "nearby"})
         if record is not None:
             records.append(record)
@@ -132,7 +133,7 @@ def decode_nearby_payload(payload: dict[str, Any]) -> NaverDecodeResult:
 
 def decode_around_payload(payload: dict[str, Any], parent_id: str) -> NaverDecodeResult:
     """Decode a Naver metadataV3/around payload into street-level pano records."""
-    neighbors = parse_neighbors(payload, parent_id)
+    neighbors = _parse_neighbors_payload(payload, parent_id)
     records = []
     dropped_count = 0
     for section_name in ("street", "other"):
@@ -150,7 +151,7 @@ def probe_naver(lat: float, lon: float, radius_m: float) -> list[dict]:
     """Probe Naver Street View near a point and flood-fill nearby street-level panoramas."""
     del radius_m
     try:
-        seed = streetlevel_naver.find_panorama(lat, lon, neighbors=False, historical=False, depth=False)
+        seed = _find_panorama(lat, lon)
     except AssertionError:
         raise
     except Exception as exc:
@@ -171,7 +172,7 @@ def probe_naver(lat: float, lon: float, radius_m: float) -> list[dict]:
         expanded.add(panoid)
         _NEIGHBOR_THROTTLE.wait(GET_NEIGHBORS_MIN_INTERVAL_SECONDS)
         try:
-            neighbors = streetlevel_naver.get_neighbors(panoid)
+            neighbors = _get_neighbors(panoid)
         except AssertionError:
             raise
         except Exception as exc:
@@ -194,6 +195,74 @@ def _add_pano(pano: NaverPanorama, records: dict[str, dict], frontier: deque[str
         return
     records[panoid] = record
     frontier.append(panoid)
+
+
+def _find_panorama(lat: float, lon: float) -> NaverPanorama | None:
+    payload = naver_api.find_panorama(lat, lon)
+    if "error" in payload:
+        return None
+    features = payload["features"]
+    if len(features) == 0:
+        return None
+    return _parse_nearby_feature(features[0])
+
+
+def _get_neighbors(panoid: str) -> Neighbors:
+    payload = naver_api.get_neighbors(panoid)
+    if "errors" in payload:
+        return Neighbors([], [])
+    return _parse_neighbors_payload(payload, panoid)
+
+
+def _parse_neighbors_payload(payload: dict[str, Any], parent_id: str) -> Neighbors:
+    panoramas = payload["panoramas"]
+    street = _parse_neighbor_section(panoramas["street"], parent_id) if "street" in panoramas else None
+    other = _parse_neighbor_section(panoramas["air"], parent_id) if "air" in panoramas else None
+    return Neighbors(street, other)
+
+
+def _parse_neighbor_section(section: list[dict[str, Any]], parent_id: str) -> list[NaverPanorama]:
+    panos = []
+    for raw_pano in section:
+        if raw_pano["id"] == parent_id:
+            continue
+        panorama_type = _parse_panorama_type(raw_pano["dtl_type"])
+        if panorama_type is None:
+            continue
+        panos.append(
+            NaverPanorama(
+                id=raw_pano["id"],
+                lat=raw_pano["latitude"],
+                lon=raw_pano["longitude"],
+                altitude=raw_pano["altitude"],
+                panorama_type=panorama_type,
+            )
+        )
+    return panos
+
+
+def _parse_nearby_feature(feature: dict[str, Any]) -> NaverPanorama | None:
+    properties = feature["properties"]
+    panorama_type = _parse_panorama_type(properties["type"])
+    if panorama_type is None:
+        return None
+    return NaverPanorama(
+        id=properties["id"],
+        lat=feature["geometry"]["coordinates"][1],
+        lon=feature["geometry"]["coordinates"][0],
+        date=_parse_date(properties["photodate"]),
+        description=properties["description"],
+        title=properties["title"],
+        altitude=properties["camera_altitude"] * 0.01,
+        panorama_type=panorama_type,
+    )
+
+
+def _parse_panorama_type(value: Any) -> PanoramaType | None:
+    try:
+        return PanoramaType(int(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _record_from_pano(pano: NaverPanorama, raw_extra: dict[str, Any] | None = None) -> dict | None:
@@ -227,6 +296,12 @@ def _format_date(value: datetime | None) -> str | None:
     if value is None:
         return None
     return value.isoformat()
+
+
+def _parse_date(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
 
 
 def _dedupe_records(records: list[dict]) -> list[dict]:

@@ -119,59 +119,63 @@ def test_naver_dedup_by_id():
 
 
 def test_naver_discovery_offline(monkeypatch):
-    import streetlevel.naver as streetlevel_naver
-    from streetlevel.naver.panorama import NaverPanorama, Neighbors, PanoramaType
+    import streetlevel.naver.api as naver_api
 
     import coverage_acquisition.providers.naver as naver_provider
 
     calls = {"find": [], "neighbors": []}
-    seed = NaverPanorama(
-        id="naver-gangnam-seed",
-        lat=37.4979,
-        lon=127.0276,
-        date=None,
-        panorama_type=PanoramaType.CAR,
-    )
-    car = NaverPanorama(
-        id="naver-gangnam-car-east",
-        lat=37.4981,
-        lon=127.0282,
-        date=None,
-        panorama_type=PanoramaType.CAR,
-    )
-    mesh = NaverPanorama(
-        id="naver-gangnam-mesh",
-        lat=37.4972,
-        lon=127.0261,
-        date=None,
-        panorama_type=PanoramaType.MESH_EQUIRECT,
-    )
-    air = NaverPanorama(
-        id="naver-gangnam-air",
-        lat=37.5000,
-        lon=127.0300,
-        date=None,
-        panorama_type=PanoramaType.AIR,
-    )
+    nearby_payload = _load_fixture("nearby_gangnam.json")
 
-    def fake_find_panorama(lat: float, lon: float, **kwargs):
-        calls["find"].append((lat, lon, kwargs))
-        assert kwargs["neighbors"] is False
-        assert kwargs["historical"] is False
-        assert kwargs["depth"] is False
-        return seed
+    def fake_find_panorama(lat: float, lon: float, session=None):
+        calls["find"].append((lat, lon, session))
+        return nearby_payload
 
-    def fake_get_neighbors(panoid: str, **kwargs):
-        calls["neighbors"].append((panoid, kwargs))
+    def fake_get_neighbors(panoid: str, session=None):
+        calls["neighbors"].append((panoid, session))
         if panoid == "naver-gangnam-seed":
-            return Neighbors(street=[car, car, mesh], other=[air])
+            return {
+                "panoramas": {
+                    "street": [
+                        {
+                            "id": "naver-gangnam-car-east",
+                            "latitude": 37.4981,
+                            "longitude": 127.0282,
+                            "altitude": 42.1,
+                            "dtl_type": 3,
+                        },
+                        {
+                            "id": "naver-gangnam-car-east",
+                            "latitude": 37.4981,
+                            "longitude": 127.0282,
+                            "altitude": 42.1,
+                            "dtl_type": 3,
+                        },
+                        {
+                            "id": "naver-gangnam-mesh",
+                            "latitude": 37.4972,
+                            "longitude": 127.0261,
+                            "altitude": 40.2,
+                            "dtl_type": 15,
+                        },
+                    ],
+                    "air": [
+                        {
+                            "id": "naver-gangnam-air",
+                            "latitude": 37.5000,
+                            "longitude": 127.0300,
+                            "altitude": 120.0,
+                            "dtl_type": 1,
+                        }
+                    ],
+                }
+            }
         raise AssertionError("frontier cap should prevent expanding past the seed")
 
     def fake_get_json(*args, **kwargs):
         raise AssertionError(f"unexpected network call: {args!r} {kwargs!r}")
 
-    monkeypatch.setattr(streetlevel_naver, "find_panorama", fake_find_panorama)
-    monkeypatch.setattr(streetlevel_naver, "get_neighbors", fake_get_neighbors)
+    monkeypatch.setattr(naver_api, "find_panorama", fake_find_panorama)
+    monkeypatch.setattr(naver_api, "get_neighbors", fake_get_neighbors)
     monkeypatch.setattr("streetlevel.util.get_json", fake_get_json)
     monkeypatch.setattr(naver_provider, "DEFAULT_FRONTIER_CAP", 1)
 
@@ -182,30 +186,67 @@ def test_naver_discovery_offline(monkeypatch):
         "naver-gangnam-car-east",
         "naver-gangnam-mesh",
     }
-    assert calls["find"] == [(37.4979, 127.0276, {"neighbors": False, "historical": False, "depth": False})]
-    assert calls["neighbors"] == [("naver-gangnam-seed", {})]
+    assert calls["find"] == [(37.4979, 127.0276, None)]
+    assert calls["neighbors"] == [("naver-gangnam-seed", None)]
 
 
 def test_naver_discovery_returns_empty_for_checked_empty(monkeypatch):
-    import streetlevel.naver as streetlevel_naver
+    import streetlevel.naver.api as naver_api
 
     import coverage_acquisition.providers.naver as naver_provider
 
-    monkeypatch.setattr(streetlevel_naver, "find_panorama", lambda lat, lon, **kwargs: None)
+    monkeypatch.setattr(naver_api, "find_panorama", lambda lat, lon, session=None: {"features": []})
 
     assert naver_provider.probe_naver(35.0, 129.0, 100.0) == []
 
 
+def test_naver_discovery_skips_unknown_neighbor_panorama_type(monkeypatch):
+    import streetlevel.naver.api as naver_api
+
+    import coverage_acquisition.providers.naver as naver_provider
+
+    nearby_payload = _load_fixture("nearby_gangnam.json")
+    around_payload = {
+        "panoramas": {
+            "street": [
+                {
+                    "id": "naver-gangnam-unknown",
+                    "latitude": 37.4980,
+                    "longitude": 127.0279,
+                    "altitude": 41.9,
+                    "dtl_type": 14,
+                },
+                {
+                    "id": "naver-gangnam-car-east",
+                    "latitude": 37.4981,
+                    "longitude": 127.0282,
+                    "altitude": 42.1,
+                    "dtl_type": 3,
+                },
+            ],
+            "air": [],
+        }
+    }
+
+    monkeypatch.setattr(naver_api, "find_panorama", lambda lat, lon, session=None: nearby_payload)
+    monkeypatch.setattr(naver_api, "get_neighbors", lambda panoid, session=None: around_payload)
+    monkeypatch.setattr(naver_provider, "DEFAULT_FRONTIER_CAP", 1)
+
+    records = naver_provider.probe_naver(37.4979, 127.0276, 100.0)
+
+    assert {record["panoid"] for record in records} == {"naver-gangnam-seed", "naver-gangnam-car-east"}
+
+
 def test_naver_discovery_raises_probe_blocked_on_undecodable(monkeypatch):
-    import streetlevel.naver as streetlevel_naver
+    import streetlevel.naver.api as naver_api
 
     import coverage_acquisition.providers.naver as naver_provider
     from coverage_acquisition.source_kinds.streetlevel import ProbeBlockedError
 
-    def fake_find_panorama(lat: float, lon: float, **kwargs):
+    def fake_find_panorama(lat: float, lon: float, session=None):
         raise KeyError("features")
 
-    monkeypatch.setattr(streetlevel_naver, "find_panorama", fake_find_panorama)
+    monkeypatch.setattr(naver_api, "find_panorama", fake_find_panorama)
 
     with pytest.raises(ProbeBlockedError):
         naver_provider.probe_naver(37.4979, 127.0276, 100.0)
@@ -214,25 +255,48 @@ def test_naver_discovery_raises_probe_blocked_on_undecodable(monkeypatch):
 def test_naver_get_neighbors_flood_fill_is_throttled(monkeypatch):
     import time
 
-    import streetlevel.naver as streetlevel_naver
-    from streetlevel.naver.panorama import NaverPanorama, Neighbors, PanoramaType
+    import streetlevel.naver.api as naver_api
 
     import coverage_acquisition.providers.naver as naver_provider
 
-    seed = NaverPanorama(id="seed", lat=37.5, lon=127.0, date=None, panorama_type=PanoramaType.CAR)
-    east = NaverPanorama(id="east", lat=37.5001, lon=127.0002, date=None, panorama_type=PanoramaType.CAR)
-    west = NaverPanorama(id="west", lat=37.4999, lon=126.9998, date=None, panorama_type=PanoramaType.CAR)
-
     call_times: list[float] = []
 
-    def fake_get_neighbors(panoid: str, **kwargs):
+    def fake_get_neighbors(panoid: str, session=None):
         call_times.append(time.monotonic())
         if panoid == "seed":
-            return Neighbors(street=[east, west], other=[])
-        return Neighbors(street=[], other=[])
+            return {
+                "panoramas": {
+                    "street": [
+                        {"id": "east", "latitude": 37.5001, "longitude": 127.0002, "altitude": 0.0, "dtl_type": 3},
+                        {"id": "west", "latitude": 37.4999, "longitude": 126.9998, "altitude": 0.0, "dtl_type": 3},
+                    ],
+                    "air": [],
+                }
+            }
+        return {"panoramas": {"street": [], "air": []}}
 
-    monkeypatch.setattr(streetlevel_naver, "find_panorama", lambda lat, lon, **kwargs: seed)
-    monkeypatch.setattr(streetlevel_naver, "get_neighbors", fake_get_neighbors)
+    monkeypatch.setattr(
+        naver_api,
+        "find_panorama",
+        lambda lat, lon, session=None: {
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [127.0, 37.5]},
+                    "properties": {
+                        "id": "seed",
+                        "camera_angle": [0.0, 0.0, 0.0],
+                        "photodate": "2026-01-29 00:00:00",
+                        "description": "seed",
+                        "title": "seed",
+                        "camera_altitude": 0,
+                        "type": 3,
+                    },
+                }
+            ]
+        },
+    )
+    monkeypatch.setattr(naver_api, "get_neighbors", fake_get_neighbors)
     monkeypatch.setattr(naver_provider, "GET_NEIGHBORS_MIN_INTERVAL_SECONDS", 0.05)
 
     naver_provider.probe_naver(37.5, 127.0, 100.0)
