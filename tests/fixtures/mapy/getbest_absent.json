@@ -1,0 +1,6 @@
+{
+  "status": 404,
+  "result": {
+    "message": "No panorama found near the requested point."
+  }
+}
