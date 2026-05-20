@@ -53,7 +53,16 @@ def coarse_cells_with_hits(
     coarse_spacing_m: float,
     pano_records: list[dict],
 ) -> list[BoundingBox]:
-    """Return coarse-grid cells containing at least one pano hit."""
+    """Return coarse-grid cells to fine-sweep, given the coarse-pass hits.
+
+    A single coarse probe only "sees" coverage within its search radius, so a
+    coarse grid point that lands in a courtyard or block interior returns
+    nothing even where coverage genuinely exists nearby. Because street-level
+    coverage is spatially contiguous, the set of cells that had a direct hit is
+    **dilated to its 8-neighbours** — a cell adjacent to a hit is very likely
+    covered too. This trades a little extra fine-sweeping for far fewer
+    wrongly-skipped cells.
+    """
     coarse_lats = sorted({lat for lat, _lon in generate_probe_grid(bbox, coarse_spacing_m)})
     coarse_lons = sorted({lon for _lat, lon in generate_probe_grid(bbox, coarse_spacing_m)})
     if len(coarse_lats) < 2 or len(coarse_lons) < 2:
@@ -68,8 +77,19 @@ def coarse_cells_with_hits(
         if lat_index is not None and lon_index is not None:
             hit_cells.add((lat_index, lon_index))
 
+    lat_cell_count = len(coarse_lats) - 1
+    lon_cell_count = len(coarse_lons) - 1
+    dilated_cells: set[tuple[int, int]] = set()
+    for lat_index, lon_index in hit_cells:
+        for d_lat in (-1, 0, 1):
+            for d_lon in (-1, 0, 1):
+                neighbour_lat = lat_index + d_lat
+                neighbour_lon = lon_index + d_lon
+                if 0 <= neighbour_lat < lat_cell_count and 0 <= neighbour_lon < lon_cell_count:
+                    dilated_cells.add((neighbour_lat, neighbour_lon))
+
     cells = []
-    for lat_index, lon_index in sorted(hit_cells):
+    for lat_index, lon_index in sorted(dilated_cells):
         cells.append(
             BoundingBox(
                 min_lon=coarse_lons[lon_index],

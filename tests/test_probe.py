@@ -63,9 +63,11 @@ def test_fetch_probe_coverage_two_pass_writes_outputs_and_dedupes(tmp_path):
     assert manifest["provider"] == provider_key
     assert manifest["two_pass"] is True
     assert manifest["coarse_probe_count"] == 9
-    assert manifest["hit_cell_count"] == 1
-    assert manifest["fine_probe_count"] == 9
-    assert manifest["total_probe_count"] == 18
+    # The one directly-hit coarse cell is dilated to its 8 neighbours, so all
+    # four cells of this bbox are fine-swept (see coarse_cells_with_hits).
+    assert manifest["hit_cell_count"] == 4
+    assert manifest["fine_probe_count"] == 27
+    assert manifest["total_probe_count"] == 36
     assert manifest["pano_count"] == 1
     assert manifest["hit_count"] >= 1
     assert manifest["blocked_count"] == 0
@@ -132,3 +134,35 @@ def test_fetch_probe_coverage_blocked_probe_writes_block_manifest(tmp_path):
     assert manifest["pano_count"] == 0
     manifest_path = tmp_path / f"{provider_key}_streetlevel" / "blocked" / "manifest.json"
     assert manifest_path.exists()
+
+
+def test_coarse_cells_with_hits_dilates_to_neighbours():
+    from coverage_acquisition.probe import coarse_cells_with_hits
+
+    # ~0.01 deg coarse spacing over a 0.03 deg bbox -> a 3x3 grid of coarse cells.
+    bbox = BoundingBox(min_lon=0.0, min_lat=0.0, max_lon=0.03, max_lat=0.03)
+    centre_hit = [{"panoid": "p", "lat": 0.015, "lon": 0.015}]
+
+    cells = coarse_cells_with_hits(bbox, coarse_spacing_m=1113.2, pano_records=centre_hit)
+
+    # A single hit in the centre cell dilates to all 9 cells.
+    assert len(cells) == 9
+
+
+def test_coarse_cells_with_hits_dilation_clamps_at_edges():
+    from coverage_acquisition.probe import coarse_cells_with_hits
+
+    bbox = BoundingBox(min_lon=0.0, min_lat=0.0, max_lon=0.03, max_lat=0.03)
+    corner_hit = [{"panoid": "p", "lat": 0.005, "lon": 0.005}]
+
+    cells = coarse_cells_with_hits(bbox, coarse_spacing_m=1113.2, pano_records=corner_hit)
+
+    # A corner-cell hit dilates only to its 3 in-grid neighbours (4 cells total).
+    assert len(cells) == 4
+
+
+def test_coarse_cells_with_hits_empty_when_no_hits():
+    from coverage_acquisition.probe import coarse_cells_with_hits
+
+    bbox = BoundingBox(min_lon=0.0, min_lat=0.0, max_lon=0.03, max_lat=0.03)
+    assert coarse_cells_with_hits(bbox, coarse_spacing_m=1113.2, pano_records=[]) == []
