@@ -67,7 +67,9 @@ touching shared files. See `docs/PLAN.md` §5 for the full 8-step pipeline.
 3. Publish the approved subplan as a GitHub issue; create the branch + worktree.
 4. Add `src/coverage_acquisition/providers/<key>.py` (`ProviderDefinition`),
    auto-discovered by the registry; reuse `geo.py` coordinate helpers.
-5. Pilot fetch → rasterize → verify → full-extent two-pass scrape.
+5. Pilot fetch → rasterize → verify → full-extent two-pass scrape. Coverage
+   scrapes are long-running — **always run them detached in `tmux`** (see the
+   `run-scraper` skill); never run a full-extent scrape in the foreground.
 6. Document quirks in the module docstring and the subplan status log.
 
 ## Parallel provider development — issues, branches, PRs
