@@ -209,3 +209,36 @@ def test_naver_discovery_raises_probe_blocked_on_undecodable(monkeypatch):
 
     with pytest.raises(ProbeBlockedError):
         naver_provider.probe_naver(37.4979, 127.0276, 100.0)
+
+
+def test_naver_get_neighbors_flood_fill_is_throttled(monkeypatch):
+    import time
+
+    import streetlevel.naver as streetlevel_naver
+    from streetlevel.naver.panorama import NaverPanorama, Neighbors, PanoramaType
+
+    import coverage_acquisition.providers.naver as naver_provider
+
+    seed = NaverPanorama(id="seed", lat=37.5, lon=127.0, date=None, panorama_type=PanoramaType.CAR)
+    east = NaverPanorama(id="east", lat=37.5001, lon=127.0002, date=None, panorama_type=PanoramaType.CAR)
+    west = NaverPanorama(id="west", lat=37.4999, lon=126.9998, date=None, panorama_type=PanoramaType.CAR)
+
+    call_times: list[float] = []
+
+    def fake_get_neighbors(panoid: str, **kwargs):
+        call_times.append(time.monotonic())
+        if panoid == "seed":
+            return Neighbors(street=[east, west], other=[])
+        return Neighbors(street=[], other=[])
+
+    monkeypatch.setattr(streetlevel_naver, "find_panorama", lambda lat, lon, **kwargs: seed)
+    monkeypatch.setattr(streetlevel_naver, "get_neighbors", fake_get_neighbors)
+    monkeypatch.setattr(naver_provider, "GET_NEIGHBORS_MIN_INTERVAL_SECONDS", 0.05)
+
+    naver_provider.probe_naver(37.5, 127.0, 100.0)
+
+    # seed + east + west = 3 get_neighbors calls; consecutive calls must be
+    # spaced by at least the configured throttle interval.
+    assert len(call_times) == 3
+    gaps = [call_times[i + 1] - call_times[i] for i in range(len(call_times) - 1)]
+    assert all(gap >= 0.05 * 0.8 for gap in gaps), gaps

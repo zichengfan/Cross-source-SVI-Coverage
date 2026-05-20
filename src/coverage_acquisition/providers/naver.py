@@ -11,9 +11,11 @@ then do bulk discovery through get_neighbors on panorama.map.naver.com, whose ro
 
 from __future__ import annotations
 
+import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
 from typing import Any
 
 import streetlevel.naver as streetlevel_naver
@@ -32,6 +34,31 @@ STREETLEVEL_PANORAMA_TYPES = {
     int(PanoramaType.MESH_EQUIRECT),
 }
 DEFAULT_FRONTIER_CAP = 256
+
+# The flood-fill can fire up to DEFAULT_FRONTIER_CAP get_neighbors calls per
+# probe; throttle every one of them so the burst stays a polite scrape.
+GET_NEIGHBORS_MIN_INTERVAL_SECONDS = 1.0
+
+
+class _NeighborThrottle:
+    """Process-wide minimum-interval gate for get_neighbors calls."""
+
+    def __init__(self) -> None:
+        self._last_request: float | None = None
+        self._lock = Lock()
+
+    def wait(self, min_interval_seconds: float) -> None:
+        with self._lock:
+            now = time.monotonic()
+            if self._last_request is not None:
+                elapsed = now - self._last_request
+                if elapsed < min_interval_seconds:
+                    time.sleep(min_interval_seconds - elapsed)
+                    now = time.monotonic()
+            self._last_request = now
+
+
+_NEIGHBOR_THROTTLE = _NeighborThrottle()
 
 
 @dataclass(frozen=True)
@@ -142,6 +169,7 @@ def probe_naver(lat: float, lon: float, radius_m: float) -> list[dict]:
         if panoid in expanded:
             continue
         expanded.add(panoid)
+        _NEIGHBOR_THROTTLE.wait(GET_NEIGHBORS_MIN_INTERVAL_SECONDS)
         try:
             neighbors = streetlevel_naver.get_neighbors(panoid)
         except AssertionError:
