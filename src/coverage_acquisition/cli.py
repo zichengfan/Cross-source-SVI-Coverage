@@ -7,7 +7,8 @@ from pathlib import Path
 
 from coverage_acquisition.compare import summarize_manifest_paths
 from coverage_acquisition.downloaders import download_file, fetch_raster_tiles
-from coverage_acquisition.models import BoundingBox, FetchAreaRequest, TileFetchRequest
+from coverage_acquisition.models import BoundingBox, FetchAreaRequest, ProbeFetchRequest, TileFetchRequest
+from coverage_acquisition.probe import fetch_probe_coverage
 from coverage_acquisition.providers import (
     DEFAULT_MULTI_SOURCE_PROVIDERS,
     DIRECT_DOWNLOADS,
@@ -51,6 +52,19 @@ def build_parser() -> argparse.ArgumentParser:
     fetch_provider_parser = subparsers.add_parser("fetch-provider", help="Fetch one provider over one bbox.")
     _add_fetch_arguments(fetch_provider_parser)
     fetch_provider_parser.add_argument("--provider", required=True, choices=sorted(PROVIDERS.keys()))
+
+    fetch_probe_parser = subparsers.add_parser("fetch-probe", help="Fetch one streetlevel provider by point probes.")
+    fetch_probe_parser.add_argument("--provider", required=True)
+    fetch_probe_parser.add_argument("--output-root", required=True, type=Path)
+    fetch_probe_parser.add_argument("--bbox", nargs=4, type=float, metavar=("MIN_LON", "MIN_LAT", "MAX_LON", "MAX_LAT"))
+    fetch_probe_parser.add_argument("--preset", help="Named area preset such as amsterdam_city_bbox_approx.")
+    fetch_probe_parser.add_argument("--coarse-spacing", type=float, default=1500.0)
+    fetch_probe_parser.add_argument("--fine-spacing", type=float, default=150.0)
+    fetch_probe_parser.add_argument("--radius", type=float, default=100.0)
+    fetch_probe_parser.add_argument("--requests-per-second", type=float, default=1.0)
+    fetch_probe_parser.add_argument("--single-pass", action="store_true")
+    fetch_probe_parser.add_argument("--run-label")
+    fetch_probe_parser.add_argument("--dry-run", action="store_true")
 
     fetch_multi_parser = subparsers.add_parser("fetch-multi", help="Fetch several providers over the same bbox.")
     _add_fetch_arguments(fetch_multi_parser)
@@ -194,6 +208,23 @@ def main() -> None:
 
     if args.command == "fetch-provider":
         result = fetch_provider_coverage(build_fetch_request(args, args.provider))
+        print(json.dumps(result, indent=2, sort_keys=True, default=_json_default))
+        return
+
+    if args.command == "fetch-probe":
+        request = ProbeFetchRequest(
+            provider=args.provider,
+            bbox=resolve_bbox(args),
+            output_root=args.output_root,
+            coarse_spacing_m=args.coarse_spacing,
+            fine_spacing_m=args.fine_spacing,
+            radius_m=args.radius,
+            requests_per_second=args.requests_per_second,
+            two_pass=not args.single_pass,
+            run_label=args.run_label,
+            dry_run=args.dry_run,
+        )
+        result = fetch_probe_coverage(request)
         print(json.dumps(result, indent=2, sort_keys=True, default=_json_default))
         return
 
