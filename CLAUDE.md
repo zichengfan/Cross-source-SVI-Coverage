@@ -54,6 +54,28 @@ A new provider is one new file `providers/<key>.py` defining a
 `ProviderDefinition` as `PROVIDER` and calling `register_provider(PROVIDER)`.
 The package auto-discovers it — no shared file is edited.
 
+## Working process
+
+Agents have no memory, so quality comes from a strict, encoded process. The
+canonical flow is five **process skills** in `.claude/skills/`, run in order:
+
+1. **`grill-me`** — interview the user relentlessly until the design is fully
+   understood; resolve every branch of the decision tree.
+2. **`to-prd`** — turn the discussion into a PRD (`docs/prd/<slug>.md`, with
+   user stories + acceptance criteria); publish it as a GitHub issue.
+3. **`to-issues`** — break the PRD into independent **vertical-slice** issues
+   (thin end-to-end cuts, not horizontal layers) with blocking relationships.
+4. **`tdd`** — implement each slice red-green-refactor; never write code before
+   a failing test.
+5. **`improve-codebase-architecture`** — at phase boundaries, scan for shallow
+   modules / over-extraction / coupling and propose deeper modules.
+
+The **operational skills** slot into this flow: `add-provider` (scaffold a
+slice), `dispatch-codex` (hand slices to Codex), `verify-provider`,
+`rasterize-coverage`, `run-scraper`. For a single street-view provider, the
+lighter `docs/providers/<key>.md` subplan (via `provider-scout`) plays the PRD
+role; `to-prd` is for cross-cutting features and phases.
+
 ## Adding a new provider (the repeated workflow)
 
 Every provider goes through the same pipeline. Each provider is a

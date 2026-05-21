@@ -107,6 +107,10 @@ One or a few `foundation`-labelled PRs, built by Claude (not parallelized):
 
 ## 5. The repeatable per-provider pipeline
 
+This pipeline is the per-provider instance of the project's working process
+(`grill-me → to-prd → to-issues → tdd → improve-codebase-architecture` — see
+`CLAUDE.md`): the subplan is the PRD, one provider is one vertical-slice issue.
+
 Every provider goes through the identical 8 steps:
 
 1. **Scout** — `provider-scout` reverse-engineers the coverage endpoint and
@@ -161,9 +165,9 @@ Defined as `.claude/skills/<name>/SKILL.md`:
   z14 binary-presence COG on the shared grid.
 - **`dispatch-codex`** — take a batch of 4–6 provider specs, open their
   issues/branches/worktrees, and hand each to a Codex agent with its spec.
-- **`tdd-cycle`** — drive one red-green-refactor loop: confirm a failing test
-  exists, implement the minimum to reach green, run the suite, then refactor.
-  Refuses to write implementation code before a failing test exists.
+- **`tdd`** — drive red-green-refactor: confirm a failing test exists, implement
+  the minimum to reach green, run the suite, then refactor. The implement step
+  of the working process (see `CLAUDE.md`). Never write code before a failing test.
 
 ## 8. Git & GitHub workflow
 
@@ -290,7 +294,7 @@ net. Implementation code is never written before a failing test exists.
 - `pytest` config in `pyproject.toml`; fast (no network), runs in CI on every PR.
 
 **Roles**
-- `tdd-cycle` skill drives one red-green-refactor loop on demand.
+- `tdd` skill drives the red-green-refactor loop on demand.
 - `test-author` subagent writes the failing suite first from a spec/subplan.
 - Each provider subplan's **§3 test plan** enumerates the tests to write first.
 - `pr-reviewer` rejects PRs whose tests are missing, trivial, or written to
