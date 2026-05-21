@@ -1,0 +1,31 @@
+{
+  "provider": "naver_panorama_raster",
+  "source_id": "naver_panorama_pr_overlay_tiles_png",
+  "run_label": "seoul_city_hall_naver_pr_raster",
+  "bbox": {
+    "min_lon": 126.9708,
+    "min_lat": 37.5649,
+    "max_lon": 126.9798,
+    "max_lat": 37.5711
+  },
+  "display_zoom": 16,
+  "source_zoom": 16,
+  "source_tile_range": {
+    "x_min": 55882,
+    "x_max": 55883,
+    "y_min": 25377,
+    "y_max": 25379
+  },
+  "source_tile_count": 6,
+  "fetched_tile_count": 6,
+  "error_tile_count": 0,
+  "frontend_config": {
+    "version": "1778829614",
+    "base_style_template": "https://map.pstatic.net/nrb/styles/basic/1778829614/{z}/{x}/{y}.png",
+    "base_preview_template": "https://map.pstatic.net/nrb/styles/basic/1778829614/{z}/{x}/{y}.png?mt=bg",
+    "coverage_overlay_template": "https://map.pstatic.net/nrb/styles/basic/1778829614/{z}/{x}/{y}.png?mt=pr"
+  },
+  "tile_summary_path": "/data/zicheng/2026_global_street_view_coverage/cross_source_svi_coverage/data/raw/naver_panorama_raster/seoul_city_hall_naver_pr_raster/tile_summary.csv",
+  "errors_path": "/data/zicheng/2026_global_street_view_coverage/cross_source_svi_coverage/data/raw/naver_panorama_raster/seoul_city_hall_naver_pr_raster/errors.json",
+  "fetched_at": "2026-05-21T01:53:16+00:00"
+}

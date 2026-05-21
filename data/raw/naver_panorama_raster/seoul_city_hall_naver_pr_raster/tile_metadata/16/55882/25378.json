@@ -1,0 +1,18 @@
+{
+  "provider": "naver_panorama_raster",
+  "source_id": "naver_panorama_pr_overlay_tiles_png",
+  "display_zoom": 16,
+  "source_zoom": 16,
+  "x": 55882,
+  "y": 25378,
+  "base_tile_url": "https://map.pstatic.net/nrb/styles/basic/1778829614/16/55882/25378.png?mt=bg",
+  "coverage_tile_url": "https://map.pstatic.net/nrb/styles/basic/1778829614/16/55882/25378.png?mt=pr",
+  "base_content_type": "image/png",
+  "coverage_content_type": "image/png",
+  "coverage_pixel_count": 14260,
+  "total_pixel_count": 65536,
+  "coverage_ratio": 0.21759033203125,
+  "base_sha256": "6a0c47376c80b8704995e26e07faeaf148add1e0c1c9430fdec26b8bdad3ddeb",
+  "coverage_sha256": "163eba60bf93689b16730917986217cbdb764c1679561ba9972a90154d14ffb6",
+  "fetched_at": "2026-05-21T01:53:13+00:00"
+}
