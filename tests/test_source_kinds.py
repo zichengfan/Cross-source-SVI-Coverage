@@ -63,6 +63,42 @@ def test_decode_raster_yandex_204_is_empty(make_source, make_decode_context):
     assert result.is_empty is True
 
 
+def test_decode_raster_config_kind_alone_does_not_enable_empty_rule(make_source, make_decode_context, make_png):
+    source = make_source("raster", options={"config_kind": "yandex_stv_renderer"})
+    ctx = make_decode_context(source, payload=make_png(opaque=False), content_type="image/png")
+
+    result = get_source_kind_handler("raster")(ctx)
+
+    assert result.is_empty is False
+    assert result.tile_path is not None
+
+
+def test_decode_raster_transparent_png_empty_rule(make_source, make_decode_context, make_png):
+    source = make_source("raster", options={"empty_tile_rule": "transparent_png"})
+
+    transparent = get_source_kind_handler("raster")(
+        make_decode_context(source, payload=make_png(opaque=False), content_type="image/png")
+    )
+    opaque = get_source_kind_handler("raster")(
+        make_decode_context(source, payload=make_png(opaque=True), content_type="image/png")
+    )
+
+    assert transparent.is_empty is True
+    assert transparent.tile_path is None
+    assert opaque.is_empty is False
+    assert opaque.tile_path is not None
+
+
+def test_decode_raster_http_204_empty_rule(make_source, make_decode_context):
+    source = make_source("raster", options={"empty_tile_rule": "http_204"})
+    ctx = make_decode_context(source, payload=b"", content_type="image/png", http_status=204)
+
+    result = get_source_kind_handler("raster")(ctx)
+
+    assert result.is_empty is True
+    assert result.tile_path is None
+
+
 def test_decode_coverage_json_extracts_panos(make_source, make_decode_context):
     source = make_source("coverage_json")
     payload = json.dumps(

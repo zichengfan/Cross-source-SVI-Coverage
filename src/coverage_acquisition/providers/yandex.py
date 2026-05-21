@@ -38,6 +38,7 @@ PROVIDER = ProviderDefinition(
             expect_content_type_prefix="image/",
             options={
                 "config_kind": "yandex_stv_renderer",
+                "empty_tile_rule": "transparent_png",
                 "frontend_page_url": "https://yandex.com/maps/213/moscow/?l=stv&ll=37.565000%2C55.745000&z=13",
                 "layer": "stv",
                 "version_fallback": "2026.05.19.17.14-1_26.05.18-0-29389",

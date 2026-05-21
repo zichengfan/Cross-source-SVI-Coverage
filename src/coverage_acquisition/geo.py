@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+from pyproj import Transformer
+
 from coverage_acquisition.models import BoundingBox, TileRange
 
 
@@ -100,6 +102,8 @@ def tile_to_lonlat_bounds_for_scheme(
 ) -> tuple[float, float, float, float]:
     if coordinate_scheme == "yandex_wgs84_mercator":
         return yandex_tile_to_lonlat_bounds(x, y, zoom)
+    if coordinate_scheme == "kakao_epsg5181":
+        return kakao_tile_to_lonlat_bounds(x, y, zoom)
     return tile_to_lonlat_bounds(x, y, zoom)
 
 
@@ -259,9 +263,63 @@ def baidu_bbox_to_tile_range(bbox: BoundingBox, zoom: int) -> TileRange:
     return TileRange(x_min=min(xs), x_max=max(xs), y_min=min(ys), y_max=max(ys))
 
 
+KAKAO_EPSG5181_ORIGIN_X = -30000.0
+KAKAO_EPSG5181_ORIGIN_Y = -60000.0
+KAKAO_EPSG5181_TILE_SIZE = 256
+KAKAO_EPSG5181_RESOLUTIONS = (2048.0, 1024.0, 512.0, 256.0, 128.0, 64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25)
+WGS84_TO_KAKAO_EPSG5181 = Transformer.from_crs("EPSG:4326", "EPSG:5181", always_xy=True)
+KAKAO_EPSG5181_TO_WGS84 = Transformer.from_crs("EPSG:5181", "EPSG:4326", always_xy=True)
+
+
+def kakao_epsg5181_resolution(zoom: int) -> float:
+    try:
+        return KAKAO_EPSG5181_RESOLUTIONS[zoom]
+    except IndexError as exc:
+        raise ValueError(f"Unsupported kakao_epsg5181 zoom: {zoom}") from exc
+
+
+def wgs84_to_kakao_epsg5181_tile(lon: float, lat: float, zoom: int) -> tuple[int, int]:
+    x_m, y_m = WGS84_TO_KAKAO_EPSG5181.transform(lon, lat)
+    tile_span = KAKAO_EPSG5181_TILE_SIZE * kakao_epsg5181_resolution(zoom)
+    tile_x = int(math.floor((x_m - KAKAO_EPSG5181_ORIGIN_X) / tile_span))
+    tile_y = int(math.floor((y_m - KAKAO_EPSG5181_ORIGIN_Y) / tile_span))
+    return tile_x, tile_y
+
+
+def kakao_epsg5181_bbox_to_tile_range(bbox: BoundingBox, zoom: int) -> TileRange:
+    corner_tiles = [
+        wgs84_to_kakao_epsg5181_tile(bbox.min_lon, bbox.min_lat, zoom),
+        wgs84_to_kakao_epsg5181_tile(bbox.min_lon, bbox.max_lat, zoom),
+        wgs84_to_kakao_epsg5181_tile(bbox.max_lon, bbox.min_lat, zoom),
+        wgs84_to_kakao_epsg5181_tile(bbox.max_lon, bbox.max_lat, zoom),
+    ]
+    xs = [tile[0] for tile in corner_tiles]
+    ys = [tile[1] for tile in corner_tiles]
+    return TileRange(x_min=min(xs), x_max=max(xs), y_min=min(ys), y_max=max(ys))
+
+
+def kakao_tile_to_lonlat_bounds(x: int, y: int, zoom: int) -> tuple[float, float, float, float]:
+    tile_span = KAKAO_EPSG5181_TILE_SIZE * kakao_epsg5181_resolution(zoom)
+    x_min_m = KAKAO_EPSG5181_ORIGIN_X + x * tile_span
+    x_max_m = KAKAO_EPSG5181_ORIGIN_X + (x + 1) * tile_span
+    y_min_m = KAKAO_EPSG5181_ORIGIN_Y + y * tile_span
+    y_max_m = KAKAO_EPSG5181_ORIGIN_Y + (y + 1) * tile_span
+    lonlat_corners = [
+        KAKAO_EPSG5181_TO_WGS84.transform(x_min_m, y_min_m),
+        KAKAO_EPSG5181_TO_WGS84.transform(x_min_m, y_max_m),
+        KAKAO_EPSG5181_TO_WGS84.transform(x_max_m, y_min_m),
+        KAKAO_EPSG5181_TO_WGS84.transform(x_max_m, y_max_m),
+    ]
+    lons = [corner[0] for corner in lonlat_corners]
+    lats = [corner[1] for corner in lonlat_corners]
+    return min(lons), min(lats), max(lons), max(lats)
+
+
 def tile_range_for_bbox(bbox: BoundingBox, zoom: int, coordinate_scheme: str) -> TileRange:
     if coordinate_scheme == "baidu":
         return baidu_bbox_to_tile_range(bbox, zoom)
     if coordinate_scheme == "yandex_wgs84_mercator":
         return yandex_bbox_to_tile_range(bbox, zoom)
+    if coordinate_scheme == "kakao_epsg5181":
+        return kakao_epsg5181_bbox_to_tile_range(bbox, zoom)
     return bbox_to_tile_range(bbox, zoom)

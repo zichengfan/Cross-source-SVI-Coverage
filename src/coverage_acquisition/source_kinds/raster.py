@@ -17,9 +17,13 @@ from coverage_acquisition.source_kinds._base import (
 )
 
 
-def is_yandex_stv_source(source: SourceDefinition) -> bool:
-    """Yandex STV tiles need empty-tile (204 / fully transparent) special-casing."""
-    return source.options.get("config_kind") == "yandex_stv_renderer"
+def empty_tile_rule(source: SourceDefinition) -> str | None:
+    rule = source.options.get("empty_tile_rule")
+    if rule:
+        return rule
+    if source.options.get("config_kind") == "yandex_stv_renderer":
+        return "transparent_png"
+    return None
 
 
 def summarize_png(payload: bytes) -> dict[str, float | int]:
@@ -44,9 +48,9 @@ def decode_raster(ctx: DecodeContext) -> DecodeResult:
     source = ctx.source
     payload = ctx.wire_payload
     result = DecodeResult(stored_payload=payload)
-    is_yandex = is_yandex_stv_source(source)
+    rule = empty_tile_rule(source)
 
-    if is_yandex and (ctx.http_status == 204 or not payload):
+    if rule in {"http_204", "transparent_png"} and (ctx.http_status == 204 or not payload):
         result.is_empty = True
         result.stored_payload = b""
     elif source.expect_content_type_prefix and not ctx.content_type.startswith(
@@ -73,7 +77,7 @@ def decode_raster(ctx: DecodeContext) -> DecodeResult:
         result.coverage_pixel_count = summary["coverage_pixel_count"]
         result.total_pixel_count = summary["total_pixel_count"]
         result.coverage_ratio = summary["coverage_ratio"]
-        result.is_empty = bool(is_yandex and summary["coverage_pixel_count"] == 0)
+        result.is_empty = bool(rule == "transparent_png" and summary["coverage_pixel_count"] == 0)
 
     if result.is_empty is not True:
         suffix = suffix_for_content_type(ctx.content_type, ctx.tile_url, default=".png")

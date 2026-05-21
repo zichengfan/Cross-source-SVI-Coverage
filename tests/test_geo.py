@@ -8,6 +8,7 @@ from coverage_acquisition.geo import (
     lonlat_to_tile,
     tile_range_for_bbox,
     tile_to_lonlat_bounds,
+    tile_to_lonlat_bounds_for_scheme,
     yandex_elliptic_mercator_lat_to_y_fraction,
     yandex_elliptic_mercator_y_fraction_to_lat,
 )
@@ -54,3 +55,28 @@ def test_tile_range_for_bbox_dispatches_by_scheme():
     yandex = tile_range_for_bbox(bbox, 12, "yandex_wgs84_mercator")
     # Both schemes return a usable range; Yandex's elliptic grid shifts y.
     assert web.count >= 1 and yandex.count >= 1
+
+
+def test_kakao_epsg5181_known_seoul_city_hall_tile():
+    bbox = BoundingBox(min_lon=126.9779, min_lat=37.5663, max_lon=126.9779, max_lat=37.5663)
+
+    tile_range = tile_range_for_bbox(bbox, 7, "kakao_epsg5181")
+
+    assert (tile_range.x_min, tile_range.y_min) == (55, 124)
+    assert (tile_range.x_max, tile_range.y_max) == (55, 124)
+
+
+def test_kakao_epsg5181_tile_bounds_contain_round_trip_point():
+    lon, lat = 126.9779, 37.5663
+    bbox = BoundingBox(min_lon=lon, min_lat=lat, max_lon=lon, max_lat=lat)
+    tile_range = tile_range_for_bbox(bbox, 7, "kakao_epsg5181")
+
+    lon_min, lat_min, lon_max, lat_max = tile_to_lonlat_bounds_for_scheme(
+        tile_range.x_min,
+        tile_range.y_min,
+        7,
+        "kakao_epsg5181",
+    )
+
+    assert lon_min <= lon <= lon_max
+    assert lat_min <= lat <= lat_max
