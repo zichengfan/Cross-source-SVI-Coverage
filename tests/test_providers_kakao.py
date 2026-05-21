@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import json
+import io
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
-import pytest
+from PIL import Image
 
+from coverage_acquisition import geo
+from coverage_acquisition.models import BoundingBox, TileRange
 from coverage_acquisition.providers import PROVIDERS
-from coverage_acquisition.source_kinds.streetlevel import ProbeBlockedError, get_streetlevel_probe
+from coverage_acquisition.source_kinds.raster import summarize_png
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "kakao"
 
@@ -16,8 +17,12 @@ def fixture_bytes(name: str) -> bytes:
     return (FIXTURE_DIR / name).read_bytes()
 
 
-def fixture_json(name: str) -> dict:
-    return json.loads((FIXTURE_DIR / name).read_text())
+def rgba_png(pixels: list[tuple[int, int, int, int]], size: tuple[int, int]) -> bytes:
+    image = Image.new("RGBA", size)
+    image.putdata(pixels)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def test_kakao_registers():
@@ -31,107 +36,61 @@ def test_kakao_provider_shape():
     import coverage_acquisition.providers.kakao  # noqa: F401
 
     provider = PROVIDERS["kakao"]
+    source = provider.sources[0]
 
     assert len(provider.sources) == 1
-    assert provider.coordinate_scheme == "web_mercator"
-    assert provider.sources[0].kind == "streetlevel"
-    assert provider.sources[0].token_query_param is None
-    assert "Authorization" not in provider.sources[0].headers
+    assert source.kind == "raster"
+    assert provider.coordinate_scheme == "kakao_epsg5181"
+    assert provider.default_display_zoom == 7
+    assert source.display_zoom_min == 7
+    assert source.display_zoom_max == 7
+    assert source.token_query_param is None
+    assert "Authorization" not in source.headers
 
 
-def test_kakao_query_url_build():
-    from coverage_acquisition.providers.kakao import build_kakao_query_url
+def test_kakao_tile_url_build():
+    import coverage_acquisition.providers.kakao  # noqa: F401
 
-    url = build_kakao_query_url(lat=37.5663, lon=126.9779, radius_m=100, limit=100)
-    parsed = urlparse(url)
-    query = parse_qs(parsed.query)
+    source = PROVIDERS["kakao"].sources[0]
+    url = source.template.format(z=7, x=55, y=124)
 
-    assert parsed.scheme == "https"
-    assert parsed.netloc == "rv.map.kakao.com"
-    assert parsed.path == "/roadview-search/v2/nodes"
-    assert query == {
-        "PX": ["126.9779"],
-        "PY": ["37.5663"],
-        "RAD": ["100"],
-        "PAGE_SIZE": ["100"],
-        "INPUT": ["wgs"],
-        "TYPE": ["w"],
-        "SERVICE": ["glpano"],
-    }
+    assert url == "https://map0.daumcdn.net/map_roadviewline/3.00/L7/124/55.png"
+    assert url.startswith("https://map0.daumcdn.net/")
+    assert "/map_roadviewline/3.00/" in url
+    assert "/L7/124/55.png" in url
 
 
-def test_kakao_decode_coverage(monkeypatch):
-    import coverage_acquisition.providers.kakao as kakao
-
-    monkeypatch.setattr(kakao, "polite_fetch", lambda *args, **kwargs: (fixture_bytes("nodes_seoul.json"), "application/json", 200))
-
-    panos = get_streetlevel_probe("kakao")(37.5663, 126.9779, 50)
-
-    assert len(panos) == 3
-    assert all(isinstance(pano["panoid"], int) for pano in panos)
-    assert all(126.5 < pano["lon"] < 127.5 for pano in panos)
-    assert all(37.4 < pano["lat"] < 37.7 for pano in panos)
-    assert bool(panos) is True
+def test_kakao_tilecoord_seoul():
+    assert geo.wgs84_to_kakao_epsg5181_tile(126.9779, 37.5663, 7) == (55, 124)
 
 
-def test_kakao_decode_empty(monkeypatch):
-    import coverage_acquisition.providers.kakao as kakao
+def test_kakao_decode_coverage():
+    summary = summarize_png(fixture_bytes("roadviewline_L7_seoul.png"))
 
-    monkeypatch.setattr(kakao, "polite_fetch", lambda *args, **kwargs: (fixture_bytes("nodes_empty.json"), "application/json", 200))
-
-    panos = get_streetlevel_probe("kakao")(0.0, 0.0, 50)
-
-    assert panos == []
-    assert bool(panos) is False
+    assert summary["width"] == 256
+    assert summary["height"] == 256
+    assert summary["coverage_pixel_count"] > 40000
+    assert summary["coverage_ratio"] > 0.5
 
 
-def test_kakao_decode_uses_wgs_not_wcong(monkeypatch):
-    import coverage_acquisition.providers.kakao as kakao
+def test_kakao_decode_empty():
+    for fixture_name in ("roadviewline_L7_empty.png", "roadviewline_L7_empty_land.png"):
+        summary = summarize_png(fixture_bytes(fixture_name))
 
-    monkeypatch.setattr(kakao, "polite_fetch", lambda *args, **kwargs: (fixture_bytes("nodes_seoul.json"), "application/json", 200))
-    expected = fixture_json("nodes_seoul.json")["street_view"]["streetList"][0]
-
-    pano = get_streetlevel_probe("kakao")(37.5663, 126.9779, 50)[0]
-
-    assert pano["lon"] == expected["wgsx"]
-    assert pano["lat"] == expected["wgsy"]
-    assert pano["lon"] != expected["wcongx"]
-    assert pano["lat"] != expected["wcongy"]
-    assert pano["lon"] != expected["wtmx"]
-    assert pano["lat"] != expected["wtmy"]
+        assert summary["coverage_pixel_count"] == 0
 
 
-def test_kakao_decode_date(monkeypatch):
-    import coverage_acquisition.providers.kakao as kakao
+def test_kakao_presence_alpha_not_color():
+    transparent = (0, 0, 0, 0)
+    one_alpha_pixel = [transparent] * 16
+    one_alpha_pixel[5] = (0, 0, 0, 1)
 
-    monkeypatch.setattr(kakao, "polite_fetch", lambda *args, **kwargs: (fixture_bytes("nodes_seoul.json"), "application/json", 200))
-
-    pano = get_streetlevel_probe("kakao")(37.5663, 126.9779, 50)[0]
-
-    assert pano["date"] == "2015-09-30"
-
-
-@pytest.mark.parametrize(
-    ("fixture_name", "expected"),
-    [
-        ("nodes_seoul.json", True),
-        ("nodes_empty.json", False),
-    ],
-)
-def test_kakao_presence_rule(monkeypatch, fixture_name, expected):
-    import coverage_acquisition.providers.kakao as kakao
-
-    monkeypatch.setattr(kakao, "polite_fetch", lambda *args, **kwargs: (fixture_bytes(fixture_name), "application/json", 200))
-
-    panos = get_streetlevel_probe("kakao")(37.5663, 126.9779, 50)
-
-    assert bool(panos) is expected
+    assert summarize_png(rgba_png(one_alpha_pixel, (4, 4)))["coverage_pixel_count"] == 1
+    assert summarize_png(rgba_png([transparent] * 16, (4, 4)))["coverage_pixel_count"] == 0
 
 
-def test_kakao_probe_raises_blocked_on_undecodable_response(monkeypatch):
-    import coverage_acquisition.providers.kakao as kakao
+def test_kakao_tile_range_korea():
+    tile_range = geo.tile_range_for_bbox(BoundingBox(124.5, 33.0, 131.9, 38.7), 7, "kakao_epsg5181")
 
-    monkeypatch.setattr(kakao, "polite_fetch", lambda *args, **kwargs: (b"<html>blocked</html>", "text/html", 200))
-
-    with pytest.raises(ProbeBlockedError):
-        get_streetlevel_probe("kakao")(37.5663, 126.9779, 50)
+    assert tile_range == TileRange(x_min=-1, x_max=168, y_min=1, y_max=158)
+    assert tile_range.count == 26860

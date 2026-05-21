@@ -1,100 +1,24 @@
-"""Kakao Maps Road View coverage provider.
+"""Kakao Road View coverage-overlay raster tiles.
 
-This provider probes the public Kakao Road View radius-search JSON API on
-`rv.map.kakao.com` only. The Kakao viewer host `map.kakao.com` has a restrictive
-robots.txt, so this module must never crawl viewer pages there; the viewer URL
-appears only as a referer. Coverage is South Korea only and requires no auth.
+This provider fetches the rendered `map_roadviewline` overlay raster layer, not
+a panorama API. Tiles use Kakao's EPSG:5181 custom grid and are served at L7
+only, with a native resolution of 16 m/px. Fetch only from `*.daumcdn.net`,
+whose robots.txt has an empty `Disallow:` rule; never crawl `map.kakao.com`,
+which disallows crawling and appears here only as a Referer. Coverage is South
+Korea only and requires no auth.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
-from typing import Any
-
-from streetlevel.kakao.api import build_find_panoramas_request_url
-from streetlevel.kakao.parse import parse_panoramas
-
 from coverage_acquisition.models import BoundingBox, ProviderDefinition, SourceDefinition
-from coverage_acquisition.polite import polite_fetch
 from coverage_acquisition.providers._registry import register_provider
-from coverage_acquisition.source_kinds.streetlevel import ProbeBlockedError, register_streetlevel_probe
-
-
-@dataclass(frozen=True)
-class KakaoProbeConfig:
-    limit: int = 100
-    user_agent: str = "global-svi-coverage-observatory/0.3"
-
-
-KAKAO_PROBE_CONFIG = KakaoProbeConfig()
-
-KAKAO_HEADERS = {
-    "User-Agent": KAKAO_PROBE_CONFIG.user_agent,
-    "Accept": "application/json",
-    "Referer": "https://map.kakao.com/",
-}
-
-
-def build_kakao_query_url(lat: float, lon: float, radius_m: float, limit: int = 100) -> str:
-    """Build a Kakao Road View radius-search URL using streetlevel's API helper."""
-    return build_find_panoramas_request_url(
-        lat=lat,
-        lon=lon,
-        radius=int(round(radius_m)),
-        limit=int(limit),
-    )
-
-
-def probe_kakao_coverage(lat: float, lon: float, radius_m: float) -> list[dict]:
-    """Probe Kakao Road View coverage near one WGS84 point."""
-    url = build_kakao_query_url(lat=lat, lon=lon, radius_m=radius_m, limit=KAKAO_PROBE_CONFIG.limit)
-    payload, content_type, _status = polite_fetch(url, headers=KAKAO_HEADERS)
-    if not content_type.startswith("application/json"):
-        raise ProbeBlockedError(f"Kakao probe returned unexpected content type: {content_type!r}")
-    return decode_kakao_panoramas(payload)
-
-
-def decode_kakao_panoramas(payload: bytes | str) -> list[dict]:
-    """Decode Kakao Road View JSON into normalized pano dictionaries."""
-    try:
-        response = json.loads(payload.decode("utf-8") if isinstance(payload, bytes) else payload)
-        street_view = response["street_view"]
-        count = int(street_view["cnt"])
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ProbeBlockedError("Kakao probe returned undecodable JSON.") from exc
-
-    street_list = street_view.get("streetList")
-    if count == 0:
-        return []
-    if not isinstance(street_list, list):
-        raise ProbeBlockedError("Kakao probe returned a non-empty response without streetList.")
-
-    try:
-        panoramas = parse_panoramas(response)
-    except Exception as exc:
-        raise ProbeBlockedError("Kakao probe returned an unparseable panorama list.") from exc
-
-    return [_to_pano_record(panorama, raw) for panorama, raw in zip(panoramas, street_list, strict=True)]
-
-
-def _to_pano_record(panorama: Any, raw: dict) -> dict:
-    date = panorama.date.date().isoformat() if panorama.date is not None else None
-    return {
-        "panoid": panorama.id,
-        "lat": panorama.lat,
-        "lon": panorama.lon,
-        "date": date,
-        "raw": raw,
-    }
-
 
 PROVIDER = ProviderDefinition(
     key="kakao",
-    output_namespace="kakao_roadview_coverage",
-    run_label_prefix="kakao_roadview_coverage",
-    default_display_zoom=14,
-    coordinate_scheme="web_mercator",
+    output_namespace="kakao_roadview_overlay_raster",
+    run_label_prefix="kakao_roadview_overlay",
+    default_display_zoom=7,
+    coordinate_scheme="kakao_epsg5181",
     area_presets={
         "seoul_city_hall_bbox": BoundingBox(
             min_lon=126.960,
@@ -105,28 +29,32 @@ PROVIDER = ProviderDefinition(
     },
     sources=(
         SourceDefinition(
-            id="kakao_roadview_nodes",
-            kind="streetlevel",
-            template=(
-                "https://rv.map.kakao.com/roadview-search/v2/nodes?"
-                "PX={lon}&PY={lat}&RAD={radius}&PAGE_SIZE={limit}&INPUT=wgs&TYPE=w&SERVICE=glpano"
-            ),
-            headers=KAKAO_HEADERS,
-            expect_content_type_prefix="application/json",
-            storage_subdir="nodes",
+            id="kakao_roadviewline",
+            kind="raster",
+            template="https://map0.daumcdn.net/map_roadviewline/3.00/L{z}/{y}/{x}.png",
+            headers={
+                "User-Agent": "global-svi-coverage-observatory/0.3",
+                "Accept": "image/png,image/*;q=0.9,*/*;q=0.1",
+                "Referer": "https://map.kakao.com/",
+            },
+            display_zoom_min=7,
+            display_zoom_max=7,
+            expect_content_type_prefix="image/",
+            storage_subdir="tiles",
             options={
-                "streetlevel_module": "kakao",
-                "search_radius_m": "100",
-                "page_size": "100",
-                "grid_spacing_m": "140",
+                "coverage_from": "alpha",
+                "empty_tile_rule": "transparent_png",
+                "layer": "map_roadviewline",
+                "version": "3.00",
+                "native_resolution_m_per_px": "16",
             },
             notes=(
-                "Kakao Road View coverage via the rv.map.kakao.com radius-search JSON API. "
-                "Point-query, not tiles; presence = street_view.cnt > 0."
+                "Kakao Road View coverage-overlay raster tiles (`map_roadviewline`, "
+                "EPSG:5181 grid, served at L7 only). Presence = alpha>0 "
+                "(transparent bg, semi-transparent blue strokes)."
             ),
         ),
     ),
 )
 
 register_provider(PROVIDER)
-register_streetlevel_probe("kakao", probe_kakao_coverage)

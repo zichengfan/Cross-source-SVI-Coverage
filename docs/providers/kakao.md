@@ -10,307 +10,413 @@ from this file alone. It requires USER APPROVAL before any issue/branch/code.
 
 Kakao Maps Road View (카카오맵 로드뷰) is the street-level imagery service of
 KakaoMap, the dominant consumer mapping platform in South Korea. Coverage is
-South Korea only (Seoul, Busan, Jeju, etc.; nothing outside Korea). It is an
-active, high-density SVI dataset with imagery dating back to ~2008 and is
-**natively supported by the `streetlevel` Python library** (a Tier-1 provider in
-the project triage, `docs/PLAN.md` §2). It is in scope because it is active and
-programmatically reachable, is not defunct, is not a re-hoster, and exposes its
-coverage through a public JSON API rather than being paid-B2B-only.
+South Korea only (Seoul, Busan, Jeju, etc.; nothing outside Korea) and is dense,
+with imagery dating back to ~2008. It is in scope because it is active and
+programmatically reachable, is not defunct, is not a re-hoster, and is not
+paid-B2B.
+
+**This subplan REDESIGNS `kakao` from a point-probe provider into a
+`kind="raster"` tile provider.** Kakao Maps renders a dedicated
+**Road View coverage-overlay tile layer** — the semi-transparent blue lines that
+draw "Road View exists on this road" over the basemap when Road View mode is
+on. Those overlay tiles are public `{L}/{y}/{x}.png` images on Kakao's tile CDN
+(`*.daumcdn.net`). We fetch and rasterize that rendered overlay exactly like
+`svmap_google` rasterizes Google's `sv-map` overlay — no panorama point API, no
+`streetlevel` library, no per-point JSON probing. The previous revision of this
+file incorrectly concluded "no coverage tile layer exists" — that conclusion was
+about the panorama-*point* API (`rv.map.kakao.com/roadview-search`), not the
+rendered overlay raster layer, which does exist and is the subject of this
+redesign.
 
 ## 2. Research findings (filled by provider-scout)
 
-- **Homepage / public viewer URL:** `https://map.kakao.com/` (Road View mode:
-  `map_type=TYPE_MAP&map_attribute=ROADVIEW`). Public viewer host is
-  `map.kakao.com`.
-- **Tier:** T1 (streetlevel-native).
+- **Homepage / public viewer URL:** `https://map.kakao.com/` — toggle the Road
+  View ("로드뷰") button to draw the blue coverage overlay. The viewer host is
+  `map.kakao.com`; the **tile CDN** is `map{0..3}.daumcdn.net` (the bare
+  `map.daumcdn.net` alias also works).
+- **Tier:** T1.
 
-- **Coverage endpoint(s):** Kakao does **not** serve a coverage tile layer
-  (no raster blue-lines, no MVT). Coverage is discovered through a **point-query
-  JSON API**: a radius search around a lat/lon. This is what `streetlevel.kakao`
-  wraps, and is the endpoint this provider uses.
+- **Coverage endpoint — the Road View overlay raster tile layer:**
+  - **URL template:**
+    `https://map{s}.daumcdn.net/map_roadviewline/{version}/L{z}/{y}/{x}.png`
+  - Recommended concrete template (single CDN host, no `{s}` rotation needed):
+    `https://map0.daumcdn.net/map_roadviewline/3.00/L{z}/{y}/{x}.png`
+  - **Layer code:** `map_roadviewline` — Kakao's Road View coverage-line
+    overlay. (`map_skyview` = satellite, `map_2d` = basemap, etc.; the SDK's
+    `ROADVIEW` tileset, copyright "KnWorks", is built from this layer.)
+  - **Version segment:** `3.00`. The Kakao Maps JS SDK
+    (`https://t1.daumcdn.net/mapjsapi/js/main/4.4.19/kakao.js`) defines
+    `aa.Cf = aa.ROADVIEW || "3.00"` — `3.00` is the default Road View overlay
+    version. (An old blog used `7.00`; both `3.00` and `7.00` return identical
+    tiles today — the segment is effectively a cache buster. Pin `3.00`.)
+  - **Path order is `L{z}/{y}/{x}`** — the L-level prefix, then **y, then x**
+    (confirmed from the SDK's skyview builder
+    `"map"+(a&3)+".daumcdn.net/map_skyview/L"+d+"/"+b+"/"+a+".jpg"`, where
+    `a`=x, `b`=y, `d`=L-level — i.e. `.../L{d}/{b=y}/{a=x}`). Do **not** swap
+    x/y.
+  - **Method:** `GET`. No query string required.
 
-  - **Primary (radius search):**
-    `GET https://rv.map.kakao.com/roadview-search/v2/nodes?PX={lon}&PY={lat}&RAD={radius}&PAGE_SIZE={limit}&INPUT=wgs&TYPE=w&SERVICE=glpano`
-    - `PX` = longitude (WGS84), `PY` = latitude (WGS84), `INPUT=wgs` selects
-      WGS84 input.
-    - `RAD` = search radius in metres (max **100**; streetlevel default 35).
-    - `PAGE_SIZE` = max results (max **100**; streetlevel default 50).
-    - Wrapped by `streetlevel.kakao.find_panoramas(lat, lon, radius, limit, session)`
-      and `find_panoramas_async(...)`.
-  - **By-id (not used for coverage):**
-    `GET https://rv.map.kakao.com/roadview-search/v2/node/{panoid}?SERVICE=glpano`
-    — wrapped by `streetlevel.kakao.find_panorama_by_id`. Used only for
-    single-pano metadata / historical panos; **not** needed for coverage
-    enumeration.
-  - **Method:** `GET`. **Headers:** none required (the bare request returns
-    JSON; tested with a custom descriptive User-Agent and it works fine).
+- **Coordinate scheme:** **NOT web mercator.** Kakao map tiles use a
+  **Korea-specific Transverse Mercator grid (EPSG:5181)** — a custom grid
+  `geo.py` does not currently support. This is the one structural complication
+  of the redesign and requires a small foundation change (see §4, item 1).
+  Grid parameters (from the Gaia3D `OL3_KoreanTmsLayer` reference, the de-facto
+  public spec, and confirmed live against Seoul/Busan/Jeju):
+  - **CRS:** EPSG:5181 — `+proj=tmerc +lat_0=38 +lon_0=127 +k=1 +x_0=200000
+    +y_0=500000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs`.
+  - **Tile origin (bottom-left, EPSG:5181 metres):** `(-30000, -60000)`.
+  - **Y axis points UP** (origin at bottom-left; tile `y` increases northward —
+    this is TMS-style, **not** the XYZ top-left scheme).
+  - **Resolutions array (metres/pixel), index = L-level:**
+    `[2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1, 0.5, 0.25]`
+    (14 levels, `L0`..`L13`).
+  - **Tile size:** 256×256 px.
+  - **Tile math:** project (lon,lat) WGS84 → (X,Y) EPSG:5181, then
+    `tx = floor((X - (-30000)) / (resolution[L] * 256))`,
+    `ty = floor((Y - (-60000)) / (resolution[L] * 256))`.
+    Verified: Seoul City Hall (126.9779, 37.5663) → EPSG:5181
+    `(198047.5, 451862.8)` → **L7 tile `(tx=55, ty=124)`**, which fetches a
+    real overlay tile.
 
-- **Coordinate scheme:** input/output is **WGS84 lon/lat** (`wgsx`/`wgsy` in
-  the response). The project's z14 raster grid is standard `web_mercator`, so
-  `coordinate_scheme="web_mercator"` is correct for this provider. Kakao also
-  returns `wcongx`/`wcongy` (WCongnamul, Kakao's own projection) and
-  `wtmx`/`wtmy` (Korea TM) — **ignore both**; always use `wgsx`/`wgsy`.
+- **Zoom range / native overlay zoom / tile size / response format:**
+  - **The `map_roadviewline` overlay is served at `L7` ONLY.** A full L0–L13
+    scan over Seoul (3×3 tile grid per level) returned content **only at L7**;
+    every other level returns the empty placeholder. Kakao draws the coverage
+    overlay into a single resolution level and the viewer scales it
+    client-side. **`L7` is the only level to fetch.**
+  - L7 resolution = **16 m/pixel** (256 px tile = 4096 m on the ground).
+  - Response format: **PNG, 256×256, RGBA** (transparent background + blue
+    strokes). `Content-Type: image/png`.
+  - **`display_zoom_min = display_zoom_max = 7`** (the provider has exactly one
+    valid source zoom: L7). `default_display_zoom = 7`.
+  - **Note on grid mismatch:** L7 (16 m/px) is coarser than the project's
+    analysis grid z14 (~9.5 m/px). This is acceptable — the overlay strokes are
+    thick (≈8–12 px wide) so they over-represent each covered road; rasterizing
+    L7 tiles onto the z14 grid (`raster` kind → `rasterize.py`) yields a sound
+    binary-presence layer, the same coarse-overlay tradeoff `svmap_google`
+    accepts. Document the 16 m/px native resolution in the module docstring.
 
-- **Zoom range / tile size / response format:** Not a tile API — there is no
-  zoom or tile size. Response is **JSON**. Shape (confirmed live, Seoul):
-  ```json
-  {"street_view": {
-     "cnt": 3,
-     "street": null,
-     "streetList": [
-       {"id": 1050215196, "angle": "270.2",
-        "img_path": "/2015/09/1013588/2_100271_1013588_20150930032301",
-        "wgsx": 126.9777695, "wgsy": 37.5661338,
-        "wcongx": 495090.0, "wcongy": 1129611.0,
-        "wtmx": 198036.0, "wtmy": 451844.4,
-        "addr": "서울 중구 태평로1가",
-        "st_name": null, "st_type": null, "area_type": null,
-        "shot_date": "2015-09-30 00:00:00", "shot_tool": "101",
-        "spot": null, "past": null}
-     ]}}
-  ```
-  Empty response (ocean / outside Korea):
-  ```json
-  {"street_view": {"cnt": 0, "street": null, "streetList": null}}
-  ```
-  `streetlevel.kakao.parse_panoramas(response)` turns `streetList` into
-  `KakaoPanorama` objects; each has `.id`, `.lat`, `.lon`, `.date`,
-  `.heading`, `.image_path`, `.panorama_type` (a `PanoramaType` IntEnum from
-  `shot_tool`). `.date` is parsed from the timestamp suffix of `img_path`.
+- **Auth:** **none.** No token, no cookie, no API key, no signed URL. A plain
+  `GET` with a descriptive `User-Agent` returns the tile. A `Referer` of
+  `https://map.kakao.com/` is sent for politeness/consistency with the viewer
+  but is **not** enforced (tiles return 200 without it). **No `.env` key
+  needed.**
 
-- **Auth:** **none.** No token, no cookie, no API key. No `.env` key needed.
-
-- **Presence rule:** "imagery exists" at a query point ⇔
-  `response["street_view"]["cnt"] > 0` (equivalently, `find_panoramas(...)`
-  returns a non-empty list). Each returned `KakaoPanorama` is one coverage
-  point at `(.lon, .lat)`. The set of all returned panorama coordinates across
-  all discovery queries is the coverage point cloud that gets rasterized to the
-  z14 binary-presence grid (PLAN §1: "burn geometry; buffer isolated points").
+- **Presence rule:** **alpha-based** (`coverage_from="alpha"`). The overlay is
+  drawn as semi-transparent blue strokes on a **fully transparent background**
+  (`alpha == 0`). Each road stroke is rendered at `alpha == 117`
+  (`RGB ≈ (157, 194, 246)`); where strokes overlap (intersections, parallel
+  roads within the ~10 px stroke width) the alpha composites up to ~254 and the
+  colour darkens (`RGB ≈ (25, 91, 181)`). **Re-verified live 2026-05-21** on the
+  L7 Seoul City Hall tile (`L7/124/55`): `alpha == 0` for only 6.0% of pixels,
+  `alpha > 0` for 94.0% — dense central Seoul has Road View on essentially every
+  street, so at 16 m/px the fat strokes merge into a near-solid fill. (The
+  earlier "33% / 67%" figure in this subplan was a scout mismeasurement;
+  the **rule** — `alpha > 0` ⇔ coverage — is correct, confirmed by the empty
+  tiles below.) Therefore:
+  - "Road View imagery exists at a pixel" ⇔ `alpha > 0` at that pixel.
+  - The existing `raster` source kind's `summarize_png()` already computes
+    exactly this (`coverage_pixel_count = np.count_nonzero(alpha)`); no new
+    decode logic is needed — `decode_raster` works as-is.
+  - **Empty / no-coverage tile signature — two forms, both HTTP 200, both
+    `coverage_pixel_count == 0`:**
+    1. **256×256 fully-transparent PNG** (~1.2 KB) — returned for in-Korea land
+       tiles with no Road View (mountains: verified Seoraksan and Jirisan peaks
+       → 100% `alpha == 0`).
+    2. **68-byte 1×1-pixel fully-transparent PNG** — returned offshore / outside
+       the grid extent (verified Pacific Ocean, East Sea).
+    There is **no 404 and no 204**. `summarize_png` handles both (it reads any
+    dimensions) → `coverage_pixel_count == 0` ⇒ checked-empty. Because the
+    no-coverage tile is always a transparent PNG, set the source option
+    **`empty_tile_rule="transparent_png"`** (the B0 foundation rule, as used by
+    `yandex`) so zero-coverage tiles are flagged `is_empty` and not stored —
+    Korea is ~70% mountainous, so most L7 tiles are empty.
 
 - **robots.txt / ToS notes; observed rate limit:**
-  - `https://rv.map.kakao.com/robots.txt` → **404 Not Found** (no robots.txt on
-    the API host ⇒ `polite.robots_allows` treats it as allowed).
-  - `https://map.kakao.com/robots.txt` → `User-agent: * Disallow: /` (and
-    explicit `Disallow` for AI bots incl. `ClaudeBot`). **This restriction is on
-    the viewer host `map.kakao.com`, not on the API host `rv.map.kakao.com`.**
-    The provider must fetch coverage **only** from `rv.map.kakao.com` and must
-    **not** crawl `map.kakao.com`. Record this caveat in the module docstring.
-  - No documented rate limit observed; a radius-100 query in dense Seoul
-    returned 96 panoramas in one call with no throttling. Use the project's
-    polite default (`PolitePolicy`, `min_interval_seconds=0.25`); consider a
-    slightly higher interval (e.g. 0.5 s) given the dense point-grid sweep.
-  - This is a polite scrape of a public, unauthenticated JSON endpoint for
-    coverage-availability research (not the imagery itself, not AI training).
+  - **`https://map0.daumcdn.net/robots.txt` → HTTP 200, `User-agent: *` /
+    `Disallow:` (empty disallow ⇒ everything allowed).** Same for
+    `map.daumcdn.net` and `map1.daumcdn.net`. **The tile CDN explicitly permits
+    crawling.** This redesign fetches **only** from `*.daumcdn.net`.
+  - `https://map.kakao.com/robots.txt` is `Disallow: /` — but this provider
+    does **not** crawl the viewer host at all (it is used only as a `Referer`
+    string). Record this caveat in the module docstring, as the previous
+    revision did.
+  - No documented or observed rate limit; a 7×6 L7 tile sweep over Seoul ran
+    with no throttling or errors. Use the project polite default
+    (`polite.polite_fetch`, per-host throttle). All tiles come from one host
+    family (`map{s}.daumcdn.net`); a single fixed host (`map0`) keeps the
+    per-host throttle honest. This is a polite scrape of public, unauthenticated
+    coverage-overlay tiles for availability research — not the imagery itself.
 
 - **Known quirks / gotchas:**
-  - **Point-query, not tile-query.** There is no coverage tile layer. Coverage
-    discovery must sweep a **grid of query points** over Korea and union the
-    returned panorama coordinates. This is fundamentally different from the
-    raster/MVT providers and is the main reason a dedicated `streetlevel`
-    source kind is needed.
-  - **Radius cap 100 m, limit cap 100.** Adjacent query points must be spaced
-    so their search disks tile the area. With `RAD=100`, a point grid spaced
-    ~140 m (≈ `100 * sqrt(2)`) gives full coverage with slight overlap. In very
-    dense urban cores a single `RAD=100` query can hit the 100-result cap and
-    silently miss panoramas; for the **coverage** use case (binary presence)
-    this is acceptable — we only need ≥1 hit per z14 cell — but the discovery
-    grid spacing should be ≤ the z14 cell size (~1.9 km) anyway, so density is
-    fine. Document the cap.
-  - **Coverage is South Korea only.** Queries outside Korea (Tokyo, Pacific)
-    return `cnt: 0`. The pass-1 discovery region must be the Korean peninsula
-    bbox; do not sweep globally.
-  - `find_panorama_by_id` "only appears to work for the most recent coverage at
-    a location" (per streetlevel docstring) — irrelevant here since we use
-    `find_panoramas`, but note it if historical dates are pursued later.
-  - `shot_date` in the raw JSON is often `YYYY-MM-DD 00:00:00` (date only);
-    `streetlevel` instead parses the precise timestamp from the `img_path`
-    suffix into `KakaoPanorama.date`. Use `.date` for the optional date layer.
-  - Historical panoramas at a location are in the `past` field of a street
-    entry (null in all sampled responses). Not needed for binary presence;
-    ignore for now.
-  - `streetlevel.kakao` itself sends **no custom headers** and uses `requests`
-    directly. The project requires fetching via `polite.polite_fetch`. Do **not**
-    call `streetlevel`'s networking functions in the fetch loop — use
-    `streetlevel.kakao.api.build_find_panoramas_request_url(...)` to build the
-    URL, fetch via `polite_fetch`, then decode with
-    `streetlevel.kakao.parse.parse_panoramas(...)` (or the equivalent JSON
-    walk). This keeps throttle/retry/robots centralised. See §4.
+  - **Custom EPSG:5181 grid, not web mercator.** The single biggest difference
+    from `svmap_google` (which is plain `web_mercator`). The fetch loop's tile
+    selection and the rasterizer's tile→bounds reprojection both need the
+    EPSG:5181 grid. This needs a new `coordinate_scheme` (see §4 item 1).
+  - **Overlay exists at L7 only.** Do not attempt L8+ (always empty) or
+    sub-L7 (always empty). The provider's source zoom is fixed at 7.
+  - **TMS-style y-axis (origin bottom-left, y increases north).** Opposite of
+    the standard XYZ top-left convention. The tile-math helper must not flip y
+    to top-left.
+  - **Empty tiles are HTTP 200, not 404/204.** Empty-tile detection is purely
+    `alpha == 0` after decode — never rely on status code. `skip_404` logic is
+    irrelevant here. The 1×1 PNG (rather than a full 256×256 transparent PNG)
+    is normal; `summarize_png` handles any dimensions.
+  - **Coverage is South Korea only.** Discovery must be bounded to the Korean
+    peninsula bbox; do not sweep globally.
+  - **Version segment is cosmetic.** `3.00` and `7.00` return identical bytes;
+    pin `3.00` (the current SDK default) and treat a future content change as a
+    re-scrape trigger, not a per-request lookup.
+  - **No date layer.** The rendered overlay carries no capture-date
+    information (it is a single flat presence layer). A `*_year.tif` date layer
+    is **not** possible from this source and is out of scope for `kakao`.
+  - **Single CDN host vs. `{s}` rotation.** Kakao's viewer load-balances across
+    `map0..map3.daumcdn.net` via `x & 3`. For a polite scraper a single fixed
+    host (`map0`) is simpler and keeps `polite`'s per-host throttle meaningful;
+    use `map0` in the template. (If throughput ever matters, host rotation is a
+    later optimization, not part of this PR.)
 
 ## 3. Test plan (write these FIRST — red before green)
 
-All tests are offline: record JSON fixtures and decode them. Live API calls are
-forbidden in unit tests (`docs/PLAN.md` §12).
+All tests are offline and decode recorded PNG fixtures; no live tile fetches in
+unit tests (`docs/PLAN.md` §12). Mirror the raster-decode tests used for
+`svmap_google` / the `raster` source kind.
 
-Fixtures to record under `tests/fixtures/kakao/`:
-- `nodes_seoul.json` — a real `find_panoramas` response for Seoul City Hall
-  (`PY=37.5663, PX=126.9779, RAD=50, PAGE_SIZE=3`), `cnt > 0`, 3 `streetList`
-  entries (sample already captured by scout — see §2).
-- `nodes_empty.json` — a `cnt: 0` response (`{"street_view": {"cnt": 0,
-  "street": null, "streetList": null}}`), from an ocean query.
+Fixtures recorded live under `tests/fixtures/kakao/` (captured 2026-05-21):
+- `roadviewline_L7_seoul.png` — the L7 Seoul City Hall overlay tile
+  (`https://map0.daumcdn.net/map_roadviewline/3.00/L7/124/55.png`); a 256×256
+  RGBA PNG, ~52 KB, 94% of pixels with `alpha > 0` (dense Road View coverage).
+- `roadviewline_L7_empty.png` — the offshore empty signature
+  (`.../L7/-63/363.png`, Pacific Ocean); the 68-byte 1×1 fully transparent PNG.
+- `roadviewline_L7_empty_land.png` — the in-Korea no-coverage signature
+  (`.../L7/64/72.png`, Jirisan peak); a 256×256 fully-transparent PNG (~1.2 KB).
 
-Tests (`tests/test_providers_kakao.py`, plus a case in the source-kind test
-file if the `streetlevel` kind is exercised generically):
+Tests (`tests/test_providers_kakao.py`):
 
 - [ ] `test_kakao_registers` — importing `coverage_acquisition.providers.kakao`
   registers `"kakao"` in `PROVIDERS`; `PROVIDERS["kakao"].key == "kakao"`.
-- [ ] `test_kakao_provider_shape` — provider has exactly one source, its `kind`
-  is the streetlevel kind (`"streetlevel"`), `coordinate_scheme ==
-  "web_mercator"`, and no auth/token fields are set.
-- [ ] `test_kakao_query_url_build` — the source's URL template / builder fills
-  correctly for a sample `(lat, lon, radius, limit)`: produces
-  `https://rv.map.kakao.com/roadview-search/v2/nodes?PX=126.9779&PY=37.5663&RAD=100&PAGE_SIZE=100&INPUT=wgs&TYPE=w&SERVICE=glpano`
-  (assert host, path, and each query param). Reuse / mirror
-  `streetlevel.kakao.api.build_find_panoramas_request_url`.
-- [ ] `test_kakao_decode_coverage` — decoding `nodes_seoul.json` yields 3
-  coverage points; each has a numeric `panoid`, and `lat`/`lon` within the
-  Seoul bbox (`126.5 < lon < 127.5`, `37.4 < lat < 37.7`); presence is True.
-- [ ] `test_kakao_decode_empty` — decoding `nodes_empty.json` (`cnt: 0`) yields
-  zero coverage points and presence is False (this is the "checked-empty"
-  case → raster value `0`).
-- [ ] `test_kakao_decode_uses_wgs_not_wcong` — the decoded point coordinates
-  equal the `wgsx`/`wgsy` values from the fixture, **not** `wcongx`/`wcongy`
-  or `wtmx`/`wtmy` (guards against picking the wrong coordinate field).
-- [ ] `test_kakao_decode_date` — a decoded record carries a capture date
-  derived from the panorama (`img_path` timestamp suffix → e.g.
-  `2015-09-30`), for the optional date layer.
-- [ ] `test_kakao_presence_rule` — a `has_coverage`-style predicate returns
-  `True` for `nodes_seoul.json` and `False` for `nodes_empty.json` (this is
-  what the two-pass `extent.discover_coverage_tiles` will call).
+- [ ] `test_kakao_provider_shape` — provider has exactly one source; its
+  `kind == "raster"`; `coordinate_scheme == "kakao_epsg5181"`;
+  `default_display_zoom == 7`; the source's `display_zoom_min == 7` and
+  `display_zoom_max == 7`; no token/cookie/auth fields are set.
+- [ ] `test_kakao_tile_url_build` — the source `template` fills correctly for a
+  sample `(z, x, y)`: with `z=7, x=55, y=124` it produces
+  `https://map0.daumcdn.net/map_roadviewline/3.00/L7/124/55.png` (assert host,
+  the `map_roadviewline` layer, the `3.00` version, the `L{z}` prefix, and that
+  the path order is `L{z}/{y}/{x}` — y before x).
+- [ ] `test_kakao_tilecoord_seoul` — the EPSG:5181 tile-math helper maps Seoul
+  City Hall `(lon=126.9779, lat=37.5663)` at `L7` to tile `(x=55, y=124)`
+  (guards the EPSG:5181 projection + origin `(-30000,-60000)` + L7 resolution
+  `16` m/px + 256-px tile, and the bottom-left/y-up axis).
+- [ ] `test_kakao_decode_coverage` — decoding `roadviewline_L7_seoul.png` via
+  the `raster` kind's `summarize_png` yields `width == 256`, `height == 256`,
+  `coverage_pixel_count > 40000`, `coverage_ratio > 0.5` — presence detected.
+- [ ] `test_kakao_decode_empty` — decoding `roadviewline_L7_empty.png` (1×1) and
+  `roadviewline_L7_empty_land.png` (256×256 transparent) both yield
+  `coverage_pixel_count == 0` ⇒ checked-empty, raster value `0`. Assert
+  `summarize_png` does not raise on a 1×1 image.
+- [ ] `test_kakao_presence_alpha_not_color` — presence is decided by **alpha**,
+  not by RGB: a synthetic 4×4 PNG that is fully transparent except one pixel
+  with `alpha > 0` decodes to `coverage_pixel_count == 1`; a fully transparent
+  4×4 PNG decodes to `0`. (Pins `coverage_from="alpha"`.)
+- [ ] `test_kakao_tile_range_korea` — `tile_range_for_bbox` for the South Korea
+  bbox `(124.5, 33.0, 131.9, 38.7)` at `L7` with the `kakao_epsg5181` scheme
+  returns the deterministic `TileRange(x_min=-1, x_max=168, y_min=1,
+  y_max=158)`, `count == 26860`. Note `x_min == -1` is correct — the bbox's
+  far-SW corner (124.5°E, 33.0°N) projects one tile west of the EPSG:5181 grid
+  origin; off-grid tiles simply return the empty placeholder, so the sweep is
+  still well-formed. (The scout's earlier "non-negative, low thousands" estimate
+  was wrong; ~27k 4096 m tiles is the real, still-cheap sweep size.)
 
-- Fixtures: `tests/fixtures/kakao/nodes_seoul.json`,
-  `tests/fixtures/kakao/nodes_empty.json` (small recorded samples; trim
-  `streetList` to ≤3 entries).
+- Fixtures: `tests/fixtures/kakao/roadviewline_L7_seoul.png`,
+  `tests/fixtures/kakao/roadviewline_L7_empty.png`,
+  `tests/fixtures/kakao/roadviewline_L7_empty_land.png` (small recorded PNGs).
 
 ## 4. Implementation subplan (steps for the implementer — TDD)
 
-- [ ] **Source kind:** NEW kind `streetlevel` — `src/coverage_acquisition/source_kinds/streetlevel.py`.
-  This is a **separate foundation PR that must merge first** (`docs/PLAN.md` §4
-  item 3 already names `streetlevel` as a seed kind). The kakao provider PR
-  depends on it and must not itself add the source kind. Design of the
-  `streetlevel` kind (foundation work, summarised here so this subplan is
+- [ ] **Source kind:** `raster` — **existing**, no new source kind needed. The
+  `raster` kind (`src/coverage_acquisition/source_kinds/raster.py`) already
+  decodes PNG tiles by alpha (`summarize_png` → `coverage_pixel_count`). `kakao`
+  is a straight `kind="raster"` provider mirroring
+  `src/coverage_acquisition/providers/svmap_google.py`.
+
+- [ ] **Foundation prerequisite — new `kakao_epsg5181` coordinate scheme.**
+  Kakao's tiles are on the EPSG:5181 Korea TM grid, which `geo.py` does not yet
+  support (`web_mercator` / `yandex_wgs84_mercator` / `baidu` only). Adding the
+  scheme is a **separate `foundation`-labelled PR that must merge before the
+  `kakao` provider PR** — it edits the shared `geo.py` and must not be bundled
+  with the provider module (per `CLAUDE.md`: provider PRs touch no shared file).
+  Scope of that foundation PR (summarised here so this subplan is
   self-contained):
-  - It is a **point-query / JSON** kind, not a `{z}/{x}/{y}` tile kind. The
-    fetch loop calls a per-source URL builder with a query point (and radius),
-    fetches via `polite.polite_fetch`, and the kind's `decode_*` handler walks
-    the JSON into `pano_records` (the same `DecodeResult.pano_records` channel
-    `coverage_json` already uses — see `source_kinds/coverage_json.py`).
-  - For kakao the decode handler: `json.loads` the payload, read
-    `street_view.cnt`; if `0` → `is_empty=True`, `pano_count=0`; else map each
-    `streetList` entry to a pano record with `provider="kakao"`,
-    `panoid=id`, `lat=wgsy`, `lon=wgsx`, `timestamp` from the panorama date,
-    plus `fetched_at`. The kind should be generic enough that `naver` (also
-    `rv.map` / streetlevel-native) can reuse it later — keep the kakao-specific
-    JSON walk behind a small per-source option (e.g.
-    `options={"streetlevel_module": "kakao"}`) or a thin decoder dispatch.
-  - Keep `streetlevel`'s own `requests`-based networking **out** of the hot
-    loop; only use `streetlevel.kakao.api.build_find_panoramas_request_url` and
-    `streetlevel.kakao.parse.parse_panoramas` (pure functions). Fetching is the
-    project's job via `polite_fetch`.
-  - The two-pass discovery for a point-query provider sweeps a **grid of query
-    points** (not tiles): generate WGS84 points over the region spaced
-    `~140 m` (`RAD=100` disks tiling with overlap), query each, union the
-    returned panorama coordinates. The `extent` module / runner will need a
-    point-grid mode for `streetlevel` sources; flag this to the foundation
-    owner if `extent.discover_coverage_tiles` is tile-only today.
+  - Add to `geo.py` a `kakao_epsg5181` branch with:
+    - constants: origin `(-30000.0, -60000.0)`, tile size `256`, resolutions
+      `[2048,1024,512,256,128,64,32,16,8,4,2,1,0.5,0.25]`.
+    - `kakao_lonlat_to_tile(lon, lat, zoom)` — project WGS84→EPSG:5181 (via
+      `pyproj`, already a transitive dep; otherwise add it), then
+      `tx=floor((X+30000)/(res*256))`, `ty=floor((Y+60000)/(res*256))`.
+    - `kakao_bbox_to_tile_range(bbox, zoom)` — corner transform → `TileRange`.
+    - `kakao_tile_to_lonlat_bounds(x, y, zoom)` — inverse, for the rasterizer
+      (EPSG:5181 tile extent → WGS84 bounds; y-up).
+    - wire all three into the dispatchers `tile_range_for_bbox` and
+      `tile_to_lonlat_bounds_for_scheme`.
+  - Unit-test the foundation scheme against the scout's verified anchor: Seoul
+    City Hall `(126.9779, 37.5663)` @ L7 → `(55, 124)`.
+  - Flag to the foundation owner that the rasterizer must reproject EPSG:5181
+    tile bounds to EPSG:3857 for the z14 COG (the COG CRS stays EPSG:3857).
 
 - [ ] Write the §3 tests first; confirm they fail (red).
+
 - [ ] Add `src/coverage_acquisition/providers/kakao.py` defining `PROVIDER`
-  (`ProviderDefinition`) and calling `register_provider(PROVIDER)`:
-  - `key="kakao"`, `output_namespace="kakao_roadview_coverage"`,
-    `run_label_prefix="kakao_roadview_coverage"`,
-    `coordinate_scheme="web_mercator"`.
-  - `default_display_zoom=14` (z14 analysis grid; point-query provider has no
-    real "display zoom", this is just the nominal value).
-  - One `SourceDefinition`:
-    - `id="kakao_roadview_nodes"`, `kind="streetlevel"`.
-    - `template="https://rv.map.kakao.com/roadview-search/v2/nodes?PX={lon}&PY={lat}&RAD={radius}&PAGE_SIZE={limit}&INPUT=wgs&TYPE=w&SERVICE=glpano"`
-      (the streetlevel kind fills `{lon}/{lat}/{radius}/{limit}` per query
-      point; if the foundation kind prefers building the URL via
-      `streetlevel.kakao.api`, keep `template` as documentation and select the
-      builder via `options`).
-    - `headers={"User-Agent": "global-svi-coverage-observatory/0.3",
-      "Accept": "application/json", "Referer": "https://map.kakao.com/"}`.
-    - `expect_content_type_prefix="application/json"`.
-    - `storage_subdir="nodes"`.
-    - `options={"streetlevel_module": "kakao", "search_radius_m": "100",
-      "page_size": "100", "grid_spacing_m": "140"}`.
-    - `notes`: "Kakao Road View coverage via the rv.map.kakao.com radius-search
-      JSON API. Point-query, not tiles; presence = street_view.cnt > 0."
+  (`ProviderDefinition`) and calling `register_provider(PROVIDER)` — mirror
+  `svmap_google.py` exactly in shape:
+  - `key="kakao"`, `output_namespace="kakao_roadview_overlay_raster"`,
+    `run_label_prefix="kakao_roadview_overlay"`.
+  - `default_display_zoom=7`.
+  - `coordinate_scheme="kakao_epsg5181"`.
   - `area_presets={"seoul_city_hall_bbox": BoundingBox(...)}` — see pilot bbox
-    below. Declare the `BoundingBox` inline in the module (do **not** add to
-    `providers/_presets.py` — keep that file conflict-free, per its docstring).
+    below; declare the `BoundingBox` inline in the module (do **not** add it to
+    `providers/_presets.py`, per that file's conflict-free docstring).
+  - One `SourceDefinition`:
+    - `id="kakao_roadviewline"`, `kind="raster"`.
+    - `template="https://map0.daumcdn.net/map_roadviewline/3.00/L{z}/{y}/{x}.png"`.
+    - `headers={"User-Agent": "global-svi-coverage-observatory/0.3",
+      "Accept": "image/png,image/*;q=0.9,*/*;q=0.1",
+      "Referer": "https://map.kakao.com/"}`.
+    - `display_zoom_min=7`, `display_zoom_max=7` (overlay exists at L7 only).
+    - `expect_content_type_prefix="image/"`.
+    - `storage_subdir="tiles"`.
+    - `options={"coverage_from": "alpha", "empty_tile_rule": "transparent_png",
+      "layer": "map_roadviewline", "version": "3.00",
+      "native_resolution_m_per_px": "16"}` — `coverage_from` kept explicit even
+      though `alpha` is the `raster` kind default; `empty_tile_rule` flags the
+      transparent no-coverage tiles (both the 1×1 and the 256×256 forms) as
+      `is_empty` so they are not stored (most of mountainous Korea is empty).
+    - `notes`: "Kakao Road View coverage-overlay raster tiles
+      (`map_roadviewline`, EPSG:5181 grid, served at L7 only). Presence =
+      alpha>0 (transparent bg, semi-transparent blue strokes)."
+
 - [ ] Implement until the §3 tests pass (green); refactor.
-- [ ] Module docstring: record the ToS caveat — fetch only from
-  `rv.map.kakao.com` (no robots.txt, allowed); never crawl `map.kakao.com`
-  (which has `Disallow: /`). Coverage is South Korea only. No auth.
+
+- [ ] Module docstring: record (a) this is the **rendered overlay raster** layer
+  (`map_roadviewline`), not a panorama API; (b) the **EPSG:5181** custom grid
+  and that the overlay is **L7-only** at 16 m/px; (c) the ToS caveat — fetch
+  **only** from `*.daumcdn.net` (robots `Disallow:` empty = allowed); never
+  crawl `map.kakao.com` (which has `Disallow: /`; it is only a `Referer`);
+  (d) coverage is South Korea only; no auth.
+
 - [ ] Pilot fetch: bbox `126.960 37.560 126.990 37.580`
-  (`Seoul — City Hall / Jung-gu`, ~3.0 km × 2.2 km). Sweep a ~140 m point grid
-  over this bbox, expect coverage points densely along the street network
-  (City Hall, Sejong-daero, Cheonggyecheon area).
-- [ ] Rasterize the pilot area to a z14 COG (`rasterize.rasterize_geometries_to_cog`,
-  points buffered by ~1 cell); sanity-check: covered pixels land on Seoul
-  streets/land, not in water, CRS EPSG:3857, `uint8`.
+  (`Seoul — City Hall / Jung-gu`, ~2.7 km × 2.2 km). At L7 this is a small
+  handful of tiles around `(tx≈55, ty≈124)`; expect every tile to be a
+  ~50–60 KB RGBA PNG with dense blue coverage strokes along the Seoul street
+  network (City Hall, Sejong-daero, Cheonggyecheon).
+
+- [ ] Rasterize the pilot area to a z14 COG (`rasterize.py`): decode each L7
+  tile, treat `alpha > 0` pixels as covered, reproject the EPSG:5181 tile
+  footprint to EPSG:3857, burn onto the shared z14 grid. Sanity-check: covered
+  pixels land on Seoul streets/land (not the Han River or sea); CRS EPSG:3857;
+  `uint8`; covered pixels > 0.
+
 - [ ] Two-pass full extent: pass-1 discovery region = South Korea bbox
-  `124.5 33.0 131.9 38.7` swept as a **point grid** (no Korean coverage exists
-  outside this). Recommended discovery grid spacing for pass-1: coarse
-  (e.g. one query point per z11 tile, ~15 km) with `RAD=100` is **not**
-  sufficient to detect all coverage — instead use a moderate grid (~1–2 km
-  spacing, i.e. roughly the z14 cell size) so any covered z14 cell is sampled.
-  Discovery zoom equivalent: **z14-aligned point grid** (one query point per
-  z14 cell centroid over the Korea bbox); cells with `cnt > 0` proceed to a
-  dense `RAD=100` / `~140 m` sweep for the final point cloud. (If a true
-  two-zoom scheme is wanted, pass-1 = z11 point grid as a fast land/region
-  filter, pass-2 = z14 dense sweep within hit regions; the implementer/foundation
-  owner picks based on the `extent` module's point-grid support.)
+  `124.5 33.0 131.9 38.7`. Because the overlay is **L7-only**, there is no
+  separate coarse discovery zoom — pass-1 and pass-2 are both at L7. Sweep the
+  Korea bbox at L7 (≈ a few thousand 4096 m tiles; cheap), keep tiles whose
+  decoded `coverage_pixel_count > 0`, drop the rest as checked-empty. (If the
+  two-pass runner insists on a coarser pass-1 zoom, run a single-pass L7 sweep
+  over the Korea bbox instead — the tile count is small enough that two passes
+  add no benefit. Flag this to the runner owner.)
+
 - [ ] Update the STAC item (`catalog.upsert_provider_item`, `tier="T1"`,
-  `source_endpoint="https://rv.map.kakao.com/roadview-search/v2/nodes"`,
+  `source_endpoint="https://map0.daumcdn.net/map_roadviewline/3.00/L{z}/{y}/{x}.png"`,
   `tos_notes` per §2). Update the inventory status for `kakao`.
 
 ## 5. Acceptance criteria (checked by provider-verifier)
 
 - All §3 tests pass; `coverage_acquisition.providers.kakao` imports and
   self-registers in `PROVIDERS`; CI smoke test (import/register/dry-run) passes.
-- Pilot fetch returns non-empty JSON for Seoul; decoding yields coverage points
-  on known Seoul streets (lands on roads/land, not in the Han River / sea).
-- The decoded point cloud uses WGS84 (`wgsx`/`wgsy`), not WCongnamul.
+- The provider's single source is `kind="raster"`,
+  `coordinate_scheme="kakao_epsg5181"`, source zoom fixed at L7.
+- Pilot L7 tiles fetch over Seoul, return `image/png`, and decode to
+  `coverage_pixel_count > 0`; an out-of-Korea tile decodes to
+  `coverage_pixel_count == 0` (checked-empty, raster value `0`) without error.
+- Coverage burns onto Seoul streets/land, not water.
 - z14 COG is valid, CRS EPSG:3857, `uint8`, covered pixels > 0, extent within
   the South Korea bbox.
-- Empty (`cnt: 0`) queries are handled as checked-empty (raster value `0`),
-  not errors.
-- Fetches via `polite.polite_fetch` with a descriptive User-Agent; no calls to
-  `streetlevel`'s own networking in the fetch loop; ToS caveats
-  (`rv.map.kakao.com` only, never `map.kakao.com`) documented in the module
-  docstring.
+- Empty tiles (HTTP 200 + 1×1 transparent PNG) are handled as checked-empty,
+  not as errors or 404s.
+- Fetches via `polite.polite_fetch` with a descriptive User-Agent; ToS caveats
+  (`*.daumcdn.net` only — robots-allowed; never `map.kakao.com`) documented in
+  the module docstring.
 
 ## 6. Status log
 
-- `2026-05-20` scout: drafted. Confirmed live against `streetlevel` 0.12.7 and
-  the `rv.map.kakao.com` API — coverage is a point-query JSON API (radius
-  search), South Korea only, no auth, custom User-Agent accepted. Key open
-  items below.
-- `2026-05-20` approval: pending — awaiting user review.
-- `YYYY-MM-DD` implement / verify: notes appended here.
+- `2026-05-20` scout: drafted (original) — concluded point-query JSON API,
+  `kind="streetlevel"`.
+- `2026-05-20` approval: pending.
+- `2026-05-21` scout: **REDESIGNED to `kind="raster"`.** Re-scouted the Kakao
+  Maps Road View rendered coverage-overlay tile layer. Confirmed live:
+  - Endpoint
+    `https://map{s}.daumcdn.net/map_roadviewline/{version}/L{z}/{y}/{x}.png`
+    (`s∈0..3`, `version=3.00` per the Kakao JS SDK
+    `aa.Cf=aa.ROADVIEW||"3.00"`). Fetchable with HTTP 200, `image/png`.
+  - Grid is **EPSG:5181** (Korea TM): origin `(-30000,-60000)`, tile size 256,
+    resolutions `[2048..0.25]`, y-axis up. Verified Seoul City Hall
+    `(126.9779,37.5663)` → L7 tile `(55,124)`.
+  - The `map_roadviewline` overlay is served at **L7 only** (16 m/px); all
+    other L-levels return empty placeholders.
+  - The L7 Seoul tile renders the Road View coverage overlay — semi-transparent
+    blue strokes (`RGB≈(75,194,255)`, `alpha≈130`) on a transparent background;
+    presence rule is `alpha > 0` (`coverage_from="alpha"`). Verified visually.
+  - Empty/no-coverage tiles = HTTP 200 + a 68-byte 1×1 transparent PNG (no 404,
+    no 204). Verified for Pacific Ocean and out-of-range coordinates.
+  - **robots.txt:** the tile CDN `*.daumcdn.net` returns `User-agent: *` /
+    `Disallow:` (empty ⇒ allowed). The viewer host `map.kakao.com` is
+    `Disallow: /` but is not crawled by this provider.
+  - Auth: none. No `.env` key. Coverage: South Korea only.
+  - One open foundation dependency: a new `kakao_epsg5181` coordinate scheme in
+    `geo.py` (separate foundation PR before the provider PR).
+- `2026-05-21` approval: approved by the user (raster redesign).
+- `2026-05-21` foundation: the `kakao_epsg5181` coordinate scheme landed on
+  `dev` via the B0 foundation PRs (#22, #23). The provider PR can proceed.
+- `2026-05-21` implement: rebuilt `providers/kakao.py` as a `kind="raster"`
+  provider on branch `provider/kakao`. While recording fixtures, two scout
+  findings were corrected (see §2/§3): (a) the covered L7 Seoul tile is 94%
+  `alpha>0`, not 67% — the rule `alpha>0 ⇔ coverage` still holds, confirmed by
+  mountain tiles decoding to 100% transparent; (b) the no-coverage signature
+  has **two** forms — a 1×1 transparent PNG (offshore) and a 256×256 fully
+  transparent PNG (in-Korea mountains) — so the source sets
+  `empty_tile_rule="transparent_png"`. Fixtures recorded:
+  `roadviewline_L7_{seoul,empty,empty_land}.png`.
+- `YYYY-MM-DD` verify: notes appended here.
 
 ---
 
 ### Open questions for the reviewer
 
-1. **`streetlevel` source kind is a hard dependency.** This provider needs the
-   new `streetlevel` source kind (point-query / JSON, not tile-based) to land
-   first as a foundation PR. Confirm that foundation PR is scheduled before the
-   T1 batch, and that the `extent`/runner two-pass machinery will support a
-   **point-grid sweep** (current `extent.discover_coverage_tiles` and the
-   `runners` job builder are tile-`{z}/{x}/{y}` oriented). This affects `naver`,
-   `mapy`, `ja360` too — all four T1 streetlevel providers are point-query.
-2. **Discovery grid spacing.** Korea bbox swept at ~140 m spacing is ~hundreds
-   of thousands of query points (heavy). Recommended approach: coarse z11-ish
-   point-grid pass-1 to localise covered regions, then dense `RAD=100` sweep
-   only there. Confirm the extent module should implement this two-tier
-   point-grid, or whether a coarser binary-presence accuracy is acceptable.
-3. **Date layer.** `KakaoPanorama.date` (precise, from `img_path`) is available
-   per pano — should the optional `*_year.tif` date layer be produced for
-   `kakao` now, or deferred? The data is essentially free to collect alongside
-   coverage.
-4. **Historical panoramas (`past` field).** Null in all sampled responses;
-   ignored for binary presence. Confirm that is acceptable (it is, for a
-   presence raster).
+1. **`kakao_epsg5181` coordinate scheme is a foundation dependency.** This
+   provider needs a new `coordinate_scheme` in the shared `geo.py` (EPSG:5181
+   Korea TM grid: project, tile-range, tile-bounds, dispatcher wiring) plus a
+   `pyproj` dependency for the WGS84↔EPSG:5181 transform. Confirm this lands as
+   a `foundation` PR before the `kakao` provider PR. No other in-scope provider
+   needs EPSG:5181 today, so the scheme can be `kakao`-specific.
+2. **L7-only overlay vs. the two-pass runner.** The overlay exists at exactly
+   one zoom (L7). The two-pass discovery machinery assumes a coarse discovery
+   zoom distinct from the z14 fetch zoom. For `kakao`, pass-1 and pass-2 are
+   both L7 — effectively a single-pass L7 sweep of the Korea bbox (a few
+   thousand 4096 m tiles, cheap). Confirm the runner can run a single-zoom
+   sweep for this provider, or that running L7 as both passes is acceptable.
+3. **16 m/px native vs. z14 (~9.5 m/px) analysis grid.** L7 is ~1.7× coarser
+   than z14. The blue strokes are thick (8–12 px) and over-represent each
+   covered road, so binary presence on z14 is sound, but covered roads will be
+   slightly fattened. Confirm this coarse-overlay tradeoff is acceptable (it is
+   the same one `svmap_google` accepts) or whether a thinning/centerline step
+   is wanted in `rasterize.py` (out of scope for this provider PR if so).
+4. **Old `streetlevel`-based `kakao` artifacts.** The current
+   `providers/kakao.py` is the point-probe implementation and registers a
+   `streetlevel` probe (`register_streetlevel_probe`). The redesign PR replaces
+   that module wholesale with the `kind="raster"` version; confirm the
+   `streetlevel`-probe registration for `kakao` (and any `data/raw/kakao` /
+   `data/intermediate/kakao` point outputs) should be removed as part of this
+   PR.
+5. **No date layer.** The rendered overlay carries no capture date — `kakao`
+   will have no `*_year.tif`. Confirm that is accepted (it is inherent to a
+   rendered-overlay raster source).
