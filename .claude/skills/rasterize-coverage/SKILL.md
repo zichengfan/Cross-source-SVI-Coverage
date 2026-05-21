@@ -24,6 +24,9 @@ single-band `uint8` binary-presence COG on the shared **z14 web-mercator grid**
    `data/intermediate/`.
 2. Load the geometries/tiles and call the matching `rasterize.py` function,
    writing the COG to `data/processed/<key>/coverage_z14.tif`.
+   For raster providers, call `rasterize_raster_tiles_to_cog` with
+   `coordinate_scheme=PROVIDERS[key].coordinate_scheme` so non-web-mercator
+   providers (for example, `kakao`) are reprojected correctly.
 3. Sanity-check the returned manifest: valid COG, CRS EPSG:3857, dtype `uint8`,
    `covered_pixel_count > 0`, extent matches the fetched area.
 4. Register the COG in the STAC catalog with `catalog.upsert_provider_item`

@@ -22,6 +22,8 @@ from shapely.geometry import MultiPoint, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform, unary_union
 
+from coverage_acquisition import geo
+
 GRID_ZOOM = 14
 TILE_SIZE = 256
 GRID_SIZE = TILE_SIZE * 2**GRID_ZOOM
@@ -99,13 +101,14 @@ def rasterize_raster_tiles_to_cog(
     output_path: str | Path,
     *,
     coverage_from: str = "alpha",
+    coordinate_scheme: str = "web_mercator",
 ) -> dict[str, object]:
     """Merge stored PNG coverage tiles into a single-band uint8 COG on the z14 grid."""
     tiles = list(tile_paths)
     if not tiles:
         raise ValueError("At least one raster tile is required.")
 
-    bounds = [_tile_bounds_3857(z, x, y) for z, x, y, _path in tiles]
+    bounds = [_tile_bounds_3857(z, x, y, coordinate_scheme=coordinate_scheme) for z, x, y, _path in tiles]
     union_bounds = (
         min(bound[0] for bound in bounds),
         min(bound[1] for bound in bounds),
@@ -201,7 +204,24 @@ def _lonlat_bounds(shape: tuple[int, int], transform_: Affine) -> tuple[float, f
     return min_lon, min_lat, max_lon, max_lat
 
 
-def _tile_bounds_3857(z: int, x: int, y: int) -> tuple[float, float, float, float]:
+def _tile_bounds_3857(
+    z: int,
+    x: int,
+    y: int,
+    coordinate_scheme: str = "web_mercator",
+) -> tuple[float, float, float, float]:
+    if coordinate_scheme != "web_mercator":
+        west, south, east, north = geo.tile_to_lonlat_bounds_for_scheme(x, y, z, coordinate_scheme)
+        corners = [
+            _TO_WEB_MERCATOR.transform(west, south),
+            _TO_WEB_MERCATOR.transform(west, north),
+            _TO_WEB_MERCATOR.transform(east, south),
+            _TO_WEB_MERCATOR.transform(east, north),
+        ]
+        xs = [corner[0] for corner in corners]
+        ys = [corner[1] for corner in corners]
+        return min(xs), min(ys), max(xs), max(ys)
+
     span = 2 * WEB_MERCATOR_HALF_WORLD / 2**z
     minx = ORIGIN_X + x * span
     maxx = minx + span
