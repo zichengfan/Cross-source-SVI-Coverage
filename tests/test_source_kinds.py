@@ -48,19 +48,13 @@ def test_decode_raster_content_type_mismatch_skipped(make_source, make_decode_co
     assert result.skip_record is not None
 
 
-def test_decode_raster_yandex_transparent_is_empty(make_source, make_decode_context, make_png):
-    source = make_source("raster", options={"config_kind": "yandex_stv_renderer"})
-    ctx = make_decode_context(source, payload=make_png(opaque=False), content_type="image/png")
-    result = get_source_kind_handler("raster")(ctx)
-    assert result.is_empty is True
-    assert result.tile_path is None
+def test_yandex_source_migrated_to_empty_tile_rule():
+    # Yandex's empty-tile behaviour is now driven by the provider-agnostic
+    # `empty_tile_rule` option, not a hard-coded `config_kind` special case.
+    from coverage_acquisition.providers import get_provider
 
-
-def test_decode_raster_yandex_204_is_empty(make_source, make_decode_context):
-    source = make_source("raster", options={"config_kind": "yandex_stv_renderer"})
-    ctx = make_decode_context(source, payload=b"", content_type="image/png", http_status=204)
-    result = get_source_kind_handler("raster")(ctx)
-    assert result.is_empty is True
+    source = get_provider("yandex").sources[0]
+    assert source.options.get("empty_tile_rule") == "transparent_png"
 
 
 def test_decode_raster_config_kind_alone_does_not_enable_empty_rule(make_source, make_decode_context, make_png):

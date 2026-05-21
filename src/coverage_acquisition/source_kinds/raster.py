@@ -18,12 +18,9 @@ from coverage_acquisition.source_kinds._base import (
 
 
 def empty_tile_rule(source: SourceDefinition) -> str | None:
-    rule = source.options.get("empty_tile_rule")
-    if rule:
-        return rule
-    if source.options.get("config_kind") == "yandex_stv_renderer":
-        return "transparent_png"
-    return None
+    """The provider-agnostic empty-tile rule, or None. Driven solely by the
+    `empty_tile_rule` source option — never by a provider-specific `config_kind`."""
+    return source.options.get("empty_tile_rule")
 
 
 def summarize_png(payload: bytes) -> dict[str, float | int]:
