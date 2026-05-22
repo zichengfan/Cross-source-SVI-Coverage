@@ -12,7 +12,6 @@ from coverage_acquisition.geo import (
     gcj02_to_wgs84,
     tencent_pixel_to_gcj02,
     tencent_point_multiplier,
-    tencent_tile_size,
 )
 from coverage_acquisition.io_utils import ensure_directory
 from coverage_acquisition.source_kinds._base import (
@@ -183,11 +182,18 @@ def _linestring_wkt(line: list[tuple[float, float]]) -> str:
     return f"LINESTRING ({coords})"
 
 
+def _tile_origin_px_from_job(ctx: DecodeContext, header: TxvnHeader) -> tuple[int, int]:
+    for tile in ctx.job.get("tencent_bl_tiles", ()):  # ordered per-region `bl` metadata from discovery
+        if int(tile["bl"]) == header.tile_index:
+            return int(tile["origin_px_x"]), int(tile["origin_px_y"])
+    return 0, 0
+
+
 def decode_tencent_mobile_street(ctx: DecodeContext) -> DecodeResult:
     result = DecodeResult(stored_payload=ctx.wire_payload)
     header = parse_txvn_header(ctx.wire_payload)
-    tile_size = tencent_tile_size(header.level)
-    tile = parse_txvn_tile(ctx.wire_payload, tile_origin_px=(ctx.x * tile_size, ctx.y * tile_size))
+    origin_px = _tile_origin_px_from_job(ctx, header)
+    tile = parse_txvn_tile(ctx.wire_payload, tile_origin_px=origin_px)
     result.is_empty = tile.is_empty
     result.feature_count = len(tile.linestrings)
     result.record_count = result.feature_count
@@ -215,7 +221,13 @@ def decode_tencent_mobile_street(ctx: DecodeContext) -> DecodeResult:
                 "mvt_id": "",
                 "geometry_type": "LineString",
                 "properties_json": json.dumps(
-                    {"idx": tile.header.idx, "date": tile.header.date, "bl": tile.header.tile_index},
+                    {
+                        "idx": tile.header.idx,
+                        "date": tile.header.date,
+                        "bl": tile.header.tile_index,
+                        "origin_px_x": origin_px[0],
+                        "origin_px_y": origin_px[1],
+                    },
                     sort_keys=True,
                 ),
                 "geometry_wkt": _linestring_wkt(line),
