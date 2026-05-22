@@ -1,308 +1,131 @@
-"""Offline tests for the Naver streetlevel provider."""
+"""Offline tests for the Naver Street View raster coverage-overlay provider."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
-import pytest
+import numpy as np
+from PIL import Image
 
+from coverage_acquisition import geo, runners
+from coverage_acquisition.models import BoundingBox, FetchAreaRequest, TileRange
 from coverage_acquisition.providers import PROVIDERS, get_provider
-from coverage_acquisition.source_kinds.streetlevel import get_streetlevel_probe
+from coverage_acquisition.source_kinds.raster import summarize_png
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "naver"
 
 
-def _load_fixture(name: str) -> dict:
-    return json.loads((FIXTURE_DIR / name).read_text(encoding="utf-8"))
+def fixture_bytes(name: str) -> bytes:
+    return (FIXTURE_DIR / name).read_bytes()
+
+
+def fixture_json(name: str) -> dict:
+    return json.loads(fixture_bytes(name).decode("utf-8"))
+
+
+def alpha_channel(name: str) -> np.ndarray:
+    with Image.open(FIXTURE_DIR / name) as image:
+        return np.array(image.convert("RGBA"))[:, :, 3]
 
 
 def test_naver_registers():
+    import coverage_acquisition.providers.naver  # noqa: F401
+
     assert "naver" in PROVIDERS
-    provider = get_provider("naver")
-
-    assert provider.key == "naver"
-    assert len(provider.sources) == 1
-    assert provider.sources[0].kind == "streetlevel"
-    assert get_streetlevel_probe("naver")
-
-
-def test_naver_source_definition():
     provider = get_provider("naver")
     source = provider.sources[0]
 
-    assert source.id == "naver_streetlevel_panos"
-    assert source.template == ""
-    assert source.storage_subdir == "streetlevel"
-    assert source.options["streetlevel_module"] == "naver"
-    assert source.options["streetlevel_type_allowlist"] == (3, 4, 13, 15)
-    assert source.options["discovery"]["posture"] == "option_b_minimize_map_naver_seed_calls"
-    assert source.options["discovery"]["frontier_cap"] > 0
+    assert provider.key == "naver"
+    assert provider.coordinate_scheme == "web_mercator"
+    assert len(provider.sources) == 1
+    assert source.kind == "raster"
+
+
+def test_naver_tile_url_build():
+    source = get_provider("naver").sources[0]
+    url = source.template.format(version="1778829614", z=14, x=13973, y=6348)
+    parsed = urlparse(url)
+
+    assert url == "https://map.pstatic.net/nrb/styles/basic/1778829614/14/13973/6348.png?mt=ps"
+    assert parsed.netloc == "map.pstatic.net"
+    assert parsed.query == "mt=ps"
+    assert "/14/13973/6348.png" in parsed.path
+
+
+def test_naver_source_definition():
+    source = get_provider("naver").sources[0]
+
+    assert source.id == "naver_streetview_overlay_png"
+    assert source.kind == "raster"
+    assert source.expect_content_type_prefix == "image/"
+    assert source.storage_subdir == "tiles"
     assert "global-svi-coverage-observatory" in source.headers["User-Agent"]
-    assert source.headers["Referer"] == "https://map.naver.com"
+    assert source.headers["Referer"] == "https://map.naver.com/"
+    assert source.headers["Accept"] == "image/png,image/*;q=0.9,*/*;q=0.1"
+    assert source.options["config_kind"] == "naver_pstatic_tiles"
+    assert source.options["tilejson_url"] == "https://map.pstatic.net/nrb/styles/basic.json?fmt=png&mt=ps"
+    assert source.options["mt"] == "ps"
+    assert source.options["version_fallback"] == "1778829614"
+    assert source.options["empty_tile_rule"] == "transparent_png"
+    assert source.options["coverage_from"] == "alpha"
 
 
-def test_naver_decode_nearby_present():
-    from coverage_acquisition.providers.naver import decode_nearby_payload
+def test_naver_tilejson_parse(monkeypatch, tmp_path):
+    source = get_provider("naver").sources[0]
+    payload = fixture_bytes("basic_styles_ps.json")
 
-    result = decode_nearby_payload(_load_fixture("nearby_gangnam.json"))
+    def fake_polite_fetch(url, *, headers=None, policy=None):
+        assert url == source.options["tilejson_url"]
+        assert headers["Referer"] == "https://map.naver.com/"
+        assert policy.timeout_seconds == 60
+        return payload, "image/json", 200
 
-    assert result.is_empty is False
-    assert len(result.records) >= 1
-    record = result.records[0]
-    assert record["panoid"] == "naver-gangnam-seed"
-    assert isinstance(record["lat"], float)
-    assert isinstance(record["lon"], float)
-    assert 33 <= record["lat"] <= 39
-    assert 124 <= record["lon"] <= 132
-    assert record["date"] == "2026-01-29T03:04:05"
+    monkeypatch.setattr(runners.polite, "polite_fetch", fake_polite_fetch)
 
-
-def test_naver_decode_nearby_empty():
-    from coverage_acquisition.providers.naver import decode_nearby_payload
-
-    result = decode_nearby_payload(_load_fixture("nearby_empty.json"))
-
-    assert result.records == []
-    assert result.is_empty is True
-
-
-def test_naver_decode_around_type_filter():
-    from coverage_acquisition.providers.naver import STREETLEVEL_PANORAMA_TYPES, decode_around_payload
-
-    result = decode_around_payload(_load_fixture("around_gangnam.json"), parent_id="naver-gangnam-seed")
-
-    assert result.dropped_count == 2
-    assert len(result.records) == 4
-    assert {record["raw"]["panorama_type"] for record in result.records} == STREETLEVEL_PANORAMA_TYPES
-    assert "naver-gangnam-air" not in {record["panoid"] for record in result.records}
-    assert "naver-gangnam-indoor" not in {record["panoid"] for record in result.records}
-
-
-def test_naver_coordinate_order():
-    from coverage_acquisition.providers.naver import decode_nearby_payload
-
-    payload = {
-        "type": "FeatureCollection",
-        "features": [
-            {
-                "type": "Feature",
-                "geometry": {"type": "Point", "coordinates": [127.5, 37.5]},
-                "properties": {
-                    "id": "coordinate-order",
-                    "camera_angle": [0.0, 0.0, 0.0],
-                    "photodate": "2026-01-29 00:00:00",
-                    "description": "coordinate regression",
-                    "title": "lon lat",
-                    "camera_altitude": 1000,
-                    "type": 3,
-                },
-            }
-        ],
-    }
-
-    record = decode_nearby_payload(payload).records[0]
-
-    assert record["lat"] == 37.5
-    assert record["lon"] == 127.5
-
-
-def test_naver_dedup_by_id():
-    from coverage_acquisition.providers.naver import decode_nearby_payload
-
-    payload = _load_fixture("nearby_gangnam.json")
-    payload["features"].append(payload["features"][0])
-
-    result = decode_nearby_payload(payload)
-
-    assert [record["panoid"] for record in result.records] == ["naver-gangnam-seed"]
-
-
-def test_naver_discovery_offline(monkeypatch):
-    import streetlevel.naver.api as naver_api
-
-    import coverage_acquisition.providers.naver as naver_provider
-
-    calls = {"find": [], "neighbors": []}
-    nearby_payload = _load_fixture("nearby_gangnam.json")
-
-    def fake_find_panorama(lat: float, lon: float, session=None):
-        calls["find"].append((lat, lon, session))
-        return nearby_payload
-
-    def fake_get_neighbors(panoid: str, session=None):
-        calls["neighbors"].append((panoid, session))
-        if panoid == "naver-gangnam-seed":
-            return {
-                "panoramas": {
-                    "street": [
-                        {
-                            "id": "naver-gangnam-car-east",
-                            "latitude": 37.4981,
-                            "longitude": 127.0282,
-                            "altitude": 42.1,
-                            "dtl_type": 3,
-                        },
-                        {
-                            "id": "naver-gangnam-car-east",
-                            "latitude": 37.4981,
-                            "longitude": 127.0282,
-                            "altitude": 42.1,
-                            "dtl_type": 3,
-                        },
-                        {
-                            "id": "naver-gangnam-mesh",
-                            "latitude": 37.4972,
-                            "longitude": 127.0261,
-                            "altitude": 40.2,
-                            "dtl_type": 15,
-                        },
-                    ],
-                    "air": [
-                        {
-                            "id": "naver-gangnam-air",
-                            "latitude": 37.5000,
-                            "longitude": 127.0300,
-                            "altitude": 120.0,
-                            "dtl_type": 1,
-                        }
-                    ],
-                }
-            }
-        raise AssertionError("frontier cap should prevent expanding past the seed")
-
-    def fake_get_json(*args, **kwargs):
-        raise AssertionError(f"unexpected network call: {args!r} {kwargs!r}")
-
-    monkeypatch.setattr(naver_api, "find_panorama", fake_find_panorama)
-    monkeypatch.setattr(naver_api, "get_neighbors", fake_get_neighbors)
-    monkeypatch.setattr("streetlevel.util.get_json", fake_get_json)
-    monkeypatch.setattr(naver_provider, "DEFAULT_FRONTIER_CAP", 1)
-
-    records = naver_provider.probe_naver(37.4979, 127.0276, 100.0)
-
-    assert {record["panoid"] for record in records} == {
-        "naver-gangnam-seed",
-        "naver-gangnam-car-east",
-        "naver-gangnam-mesh",
-    }
-    assert calls["find"] == [(37.4979, 127.0276, None)]
-    assert calls["neighbors"] == [("naver-gangnam-seed", None)]
-
-
-def test_naver_discovery_returns_empty_for_checked_empty(monkeypatch):
-    import streetlevel.naver.api as naver_api
-
-    import coverage_acquisition.providers.naver as naver_provider
-
-    monkeypatch.setattr(naver_api, "find_panorama", lambda lat, lon, session=None: {"features": []})
-
-    assert naver_provider.probe_naver(35.0, 129.0, 100.0) == []
-
-
-def test_naver_discovery_skips_unknown_neighbor_panorama_type(monkeypatch):
-    import streetlevel.naver.api as naver_api
-
-    import coverage_acquisition.providers.naver as naver_provider
-
-    nearby_payload = _load_fixture("nearby_gangnam.json")
-    around_payload = {
-        "panoramas": {
-            "street": [
-                {
-                    "id": "naver-gangnam-unknown",
-                    "latitude": 37.4980,
-                    "longitude": 127.0279,
-                    "altitude": 41.9,
-                    "dtl_type": 14,
-                },
-                {
-                    "id": "naver-gangnam-car-east",
-                    "latitude": 37.4981,
-                    "longitude": 127.0282,
-                    "altitude": 42.1,
-                    "dtl_type": 3,
-                },
-            ],
-            "air": [],
-        }
-    }
-
-    monkeypatch.setattr(naver_api, "find_panorama", lambda lat, lon, session=None: nearby_payload)
-    monkeypatch.setattr(naver_api, "get_neighbors", lambda panoid, session=None: around_payload)
-    monkeypatch.setattr(naver_provider, "DEFAULT_FRONTIER_CAP", 1)
-
-    records = naver_provider.probe_naver(37.4979, 127.0276, 100.0)
-
-    assert {record["panoid"] for record in records} == {"naver-gangnam-seed", "naver-gangnam-car-east"}
-
-
-def test_naver_discovery_raises_probe_blocked_on_undecodable(monkeypatch):
-    import streetlevel.naver.api as naver_api
-
-    import coverage_acquisition.providers.naver as naver_provider
-    from coverage_acquisition.source_kinds.streetlevel import ProbeBlockedError
-
-    def fake_find_panorama(lat: float, lon: float, session=None):
-        raise KeyError("features")
-
-    monkeypatch.setattr(naver_api, "find_panorama", fake_find_panorama)
-
-    with pytest.raises(ProbeBlockedError):
-        naver_provider.probe_naver(37.4979, 127.0276, 100.0)
-
-
-def test_naver_get_neighbors_flood_fill_is_throttled(monkeypatch):
-    import time
-
-    import streetlevel.naver.api as naver_api
-
-    import coverage_acquisition.providers.naver as naver_provider
-
-    call_times: list[float] = []
-
-    def fake_get_neighbors(panoid: str, session=None):
-        call_times.append(time.monotonic())
-        if panoid == "seed":
-            return {
-                "panoramas": {
-                    "street": [
-                        {"id": "east", "latitude": 37.5001, "longitude": 127.0002, "altitude": 0.0, "dtl_type": 3},
-                        {"id": "west", "latitude": 37.4999, "longitude": 126.9998, "altitude": 0.0, "dtl_type": 3},
-                    ],
-                    "air": [],
-                }
-            }
-        return {"panoramas": {"street": [], "air": []}}
-
-    monkeypatch.setattr(
-        naver_api,
-        "find_panorama",
-        lambda lat, lon, session=None: {
-            "features": [
-                {
-                    "type": "Feature",
-                    "geometry": {"type": "Point", "coordinates": [127.0, 37.5]},
-                    "properties": {
-                        "id": "seed",
-                        "camera_angle": [0.0, 0.0, 0.0],
-                        "photodate": "2026-01-29 00:00:00",
-                        "description": "seed",
-                        "title": "seed",
-                        "camera_altitude": 0,
-                        "type": 3,
-                    },
-                }
-            ]
-        },
+    request = FetchAreaRequest(
+        provider="naver",
+        bbox=BoundingBox(127.020, 37.490, 127.060, 37.520),
+        output_root=tmp_path,
     )
-    monkeypatch.setattr(naver_api, "get_neighbors", fake_get_neighbors)
-    monkeypatch.setattr(naver_provider, "GET_NEIGHBORS_MIN_INTERVAL_SECONDS", 0.05)
+    runtime_options = runners._build_runtime_options(source, request)
+    tilejson = fixture_json("basic_styles_ps.json")
 
-    naver_provider.probe_naver(37.5, 127.0, 100.0)
+    assert runtime_options["format_values"]["version"] == "1778829614"
+    assert runtime_options["frontend_config"]["version"] == "1778829614"
+    assert runtime_options["frontend_config"]["config_source"] == "live_tilejson"
+    assert tilejson["scheme"] == "xyz"
+    assert "{z}/{x}/{y}" in tilejson["tiles"][0]
+    assert "mt=ps" in tilejson["tiles"][0]
 
-    # seed + east + west = 3 get_neighbors calls; consecutive calls must be
-    # spaced by at least the configured throttle interval.
-    assert len(call_times) == 3
-    gaps = [call_times[i + 1] - call_times[i] for i in range(len(call_times) - 1)]
-    assert all(gap >= 0.05 * 0.8 for gap in gaps), gaps
+
+def test_naver_decode_present():
+    summary = summarize_png(fixture_bytes("overlay_gangnam_z14.png"))
+
+    assert summary["width"] == 256
+    assert summary["height"] == 256
+    assert summary["coverage_pixel_count"] > 0
+
+
+def test_naver_decode_empty():
+    summary = summarize_png(fixture_bytes("overlay_empty_ocean_z14.png"))
+
+    assert summary["coverage_pixel_count"] == 0
+    assert summary["coverage_ratio"] == 0.0
+
+
+def test_naver_coverage_from_alpha():
+    empty_alpha = alpha_channel("overlay_empty_ocean_z14.png")
+    gangnam_alpha = alpha_channel("overlay_gangnam_z14.png")
+
+    assert np.count_nonzero(empty_alpha) == 0
+    assert np.count_nonzero(gangnam_alpha > 0) > 0
+
+
+def test_naver_web_mercator_scheme():
+    tile_range = geo.tile_range_for_bbox(BoundingBox(127.020, 37.490, 127.060, 37.520), 14, "web_mercator")
+
+    assert tile_range == TileRange(x_min=13972, x_max=13974, y_min=6347, y_max=6349)
+    assert tile_range.x_min <= 13973 <= tile_range.x_max
+    assert tile_range.y_min <= 6348 <= tile_range.y_max
