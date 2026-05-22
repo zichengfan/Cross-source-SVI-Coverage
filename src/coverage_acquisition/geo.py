@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from pyproj import Transformer
 
@@ -190,6 +191,86 @@ def wgs84_to_gcj02(lon: float, lat: float) -> tuple[float, float]:
     dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * math.pi)
     dlon = (dlon * 180.0) / (a / sqrtmagic * math.cos(radlat) * math.pi)
     return lon + dlon, lat + dlat
+
+
+TENCENT_PX_SCALE = 268435456
+TENCENT_A = 114.59155902616465
+TENCENT_COMPRESS_LEVELS = (7, 11, 11, 11, 11, 11, 11, 11, 11)
+
+
+@dataclass(frozen=True)
+class TencentBlTile:
+    bl: int
+    tile_x: int
+    tile_y: int
+    origin_px_x: int
+    origin_px_y: int
+
+
+def tencent_pixel_to_gcj02(px_x: float, px_y: float) -> tuple[float, float]:
+    lon = 360.0 * px_x / TENCENT_PX_SCALE - 180.0
+    lat = math.atan(math.exp(math.radians(180.0 - 360.0 * px_y / TENCENT_PX_SCALE))) * TENCENT_A - 90.0
+    return lon, lat
+
+
+def tencent_gcj02_to_pixel(lon: float, lat: float) -> tuple[float, float]:
+    px_x = (lon + 180.0) * TENCENT_PX_SCALE / 360.0
+    px_y = (TENCENT_PX_SCALE / 360.0) * (
+        180.0 - math.degrees(math.log(math.tan((lat + 90.0) / TENCENT_A)))
+    )
+    return px_x, px_y
+
+
+def gcj02_to_wgs84(lon: float, lat: float, iterations: int = 8) -> tuple[float, float]:
+    if baidu_out_of_china(lon, lat):
+        return lon, lat
+
+    wgs_lon = lon
+    wgs_lat = lat
+    for _ in range(iterations):
+        gcj_lon, gcj_lat = wgs84_to_gcj02(wgs_lon, wgs_lat)
+        wgs_lon -= gcj_lon - lon
+        wgs_lat -= gcj_lat - lat
+    return wgs_lon, wgs_lat
+
+
+def tencent_tile_size(level: int) -> int:
+    return TENCENT_PX_SCALE // (2**level)
+
+
+def tencent_point_multiplier(level: int) -> int:
+    index = level - 10
+    if index < 0 or index >= len(TENCENT_COMPRESS_LEVELS):
+        raise ValueError(f"Unsupported Tencent data level: {level}")
+    compress_level = TENCENT_COMPRESS_LEVELS[index]
+    return math.floor(tencent_tile_size(level) / (1 << compress_level))
+
+
+def tencent_bl_tiles_for_gcj02_bbox(bbox: BoundingBox, level: int) -> list[TencentBlTile]:
+    tile_size = tencent_tile_size(level)
+    west_px, north_px = tencent_gcj02_to_pixel(bbox.min_lon, bbox.max_lat)
+    east_px, south_px = tencent_gcj02_to_pixel(bbox.max_lon, bbox.min_lat)
+
+    west = math.floor(west_px / tile_size)
+    north = math.floor(north_px / tile_size)
+    east = math.floor((east_px - 1) / tile_size)
+    south = math.floor((south_px - 1) / tile_size)
+
+    tiles = []
+    bl = 0
+    for tile_x in range(west, east + 1):
+        for tile_y in range(north, south + 1):
+            tiles.append(
+                TencentBlTile(
+                    bl=bl,
+                    tile_x=tile_x,
+                    tile_y=tile_y,
+                    origin_px_x=tile_x * tile_size,
+                    origin_px_y=tile_y * tile_size,
+                )
+            )
+            bl += 1
+    return tiles
 
 
 def gcj02_to_bd09(lon: float, lat: float) -> tuple[float, float]:
