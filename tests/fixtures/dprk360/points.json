@@ -1,0 +1,284 @@
+{
+  "lastModified": "2026-05-22",
+  "panos": [
+    {
+      "panoid": "12th_pyongyang_fashion_exhibition",
+      "lat": 39.0306,
+      "lon": 125.7682,
+      "site_name": "Kimilsungia and Kimjongilia Exhibition Hall (Okryu Hall)",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/12th_pyongyang_fashion_exhibition/",
+      "coord_source": "Wikidata Q16887425: 39°1'50.12\"N 125°46'5.30\"E; Pyongyang fashion exhibitions held at Okryu Hall / Kimilsungia-Kimjongilia Exhibition Hall, Moranbong District near Monument to Party Founding"
+    },
+    {
+      "panoid": "air_koryo_Il-18",
+      "lat": 39.2239,
+      "lon": 125.6700,
+      "site_name": "Pyongyang Sunan International Airport",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/air_koryo_Il-18/",
+      "coord_source": "Wikipedia: Pyongyang Sunan International Airport, 39°13'26\"N 125°40'12\"E; merged slugs: air_koryo_Il-18, air_koryo_Il-76 (both Air Koryo aircraft interiors, aircraft based at Sunan)"
+    },
+    {
+      "panoid": "bongsu_church",
+      "lat": 39.0453,
+      "lon": 125.7064,
+      "site_name": "Bongsu Church",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/bongsu_church/",
+      "coord_source": "Wikipedia: Bongsu Church, 39°02'43\"N 125°42'23\"E (39.045285°N 125.706361°E)"
+    },
+    {
+      "panoid": "changchung_cathedral",
+      "lat": 39.0069,
+      "lon": 125.7778,
+      "site_name": "Changchung Cathedral",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/changchung_cathedral/",
+      "coord_source": "Wikipedia: Changchung Cathedral, 39°00'25\"N 125°46'40\"E (39.00694°N 125.77778°E)"
+    },
+    {
+      "panoid": "changjon_street_night",
+      "lat": 39.0244,
+      "lon": 125.7549,
+      "site_name": "Changjon Street",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/changjon_street_night/",
+      "coord_source": "Wikidata Q31175246: 39°1'27.95\"N 125°45'17.75\"E"
+    },
+    {
+      "panoid": "chongsanri_cooperative_farm",
+      "lat": 38.9278,
+      "lon": 125.5044,
+      "site_name": "Chongsan-ri Cooperative Farm",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/chongsanri_cooperative_farm/",
+      "coord_source": "Wikidata Q112874880: 38°55'39.97\"N 125°30'15.66\"E (38.9278°N 125.5044°E); farm 28km south of Pyongyang near Nampo"
+    },
+    {
+      "panoid": "chongsu",
+      "lat": 40.4489,
+      "lon": 124.8775,
+      "site_name": "Chongsu Workers' District",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/chongsu/",
+      "coord_source": "DPRK 360 article and Beyond Parallel: Chongsu railroad crossing 40°26'56.2\"N 124°52'38.8\"E; Sakchu County, North Pyongan Province, on the Yalu River border with China"
+    },
+    {
+      "panoid": "chongun_rock",
+      "lat": 41.8651,
+      "lon": 128.1033,
+      "site_name": "Chongun Rock",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/chongun_rock/",
+      "coord_source": "Patreon/DPRK360 via web search: 41°51'54.215\"N 128°6'12.018\"E; Ryanggang Province on the Yalu River; rock formation viewed from North Korean side"
+    },
+    {
+      "panoid": "chonsam_cooperative_farm",
+      "lat": 39.0681,
+      "lon": 127.4828,
+      "site_name": "Chonsam Cooperative Farm",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/chonsam_cooperative_farm/",
+      "coord_source": "Wikimapia and web search: 39°4'5\"N 127°28'58\"E; Anbyon County, Kangwon Province, ~12km south of Wonsan"
+    },
+    {
+      "panoid": "golden_triangle_bank_rason",
+      "lat": 42.3444,
+      "lon": 130.3844,
+      "site_name": "Golden Triangle Bank, Rason",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/golden_triangle_bank_rason/",
+      "coord_source": "Wikipedia: Rason, 42°20'40\"N 130°23'04\"E; bank is at foot of the hill in centre of Rajin city (Rason special economic zone); city-centre coordinates used as building-specific coords unavailable"
+    },
+    {
+      "panoid": "hungnam_fertilizer_complex",
+      "lat": 39.8387,
+      "lon": 127.6262,
+      "site_name": "Hungnam Fertilizer Complex",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/hungnam_fertilizer_complex/",
+      "coord_source": "Beyond Parallel / CSIS analysis: complex at 39.838676°N 127.621851°E to 39.840678°N 127.629147°E; Wikipedia: Hungnam 39°50'N 127°36'E; using centroid 39.8387°N 127.6262°E"
+    },
+    {
+      "panoid": "hyangsan_dam",
+      "lat": 40.0100,
+      "lon": 126.2100,
+      "site_name": "Hyangsan Dam Bridge",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/hyangsan_dam/",
+      "coord_source": "DPRK 360 hydroelectric-dams article: bridge-dam on Chongchon/Myohyang River in Hyangsan County, near Hyangsan town; Hyangsan Hotel at 40.0180°N 126.2134°E; dam is slightly SW of hotel on the river — estimated 40.010°N 126.210°E (uncertain: no building-level source)"
+    },
+    {
+      "panoid": "hyangsan_hotel",
+      "lat": 40.0180,
+      "lon": 126.2134,
+      "site_name": "Hyangsan Hotel",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/hyangsan_hotel/",
+      "coord_source": "elevation.maplogs.com: 40.0180226°N 126.2134452°E; Hyangsan County, North Pyongan Province"
+    },
+    {
+      "panoid": "juche_tower",
+      "lat": 39.0176,
+      "lon": 125.7637,
+      "site_name": "Juche Tower",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/juche_tower/",
+      "coord_source": "Wikipedia: Juche Tower, 39°01'03\"N 125°45'49\"E (39.0176°N 125.7637°E); merged slugs: juche_tower, juche_tower_floating_view"
+    },
+    {
+      "panoid": "kaesong_old_town",
+      "lat": 37.9717,
+      "lon": 126.5528,
+      "site_name": "Kaesong Old Town",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/kaesong_old_town/",
+      "coord_source": "Wikipedia: Kaesong, 37°58'18\"N 126°33'10\"E (37.9717°N 126.5528°E); historic city centre used as no separate old-town coords available"
+    },
+    {
+      "panoid": "kalma_beach",
+      "lat": 39.1706,
+      "lon": 127.4894,
+      "site_name": "Kalma Beach (Wonsan-Kalma Coastal Tourist Area)",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/kalma_beach/",
+      "coord_source": "Wikipedia: Wonsan Kalma Coastal Tourist Area, 39°10'14\"N 127°29'22\"E (39.170604°N 127.489370°E)"
+    },
+    {
+      "panoid": "koryo_hotel",
+      "lat": 39.0087,
+      "lon": 125.7361,
+      "site_name": "Koryo Hotel",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/koryo_hotel/",
+      "coord_source": "Wikipedia: Koryo Hotel, 39°0'31.47\"N 125°44'9.92\"E (39.0087417°N 125.7360889°E)"
+    },
+    {
+      "panoid": "kpaaf_mi-17",
+      "lat": 39.2239,
+      "lon": 125.6722,
+      "site_name": "KPAAF Mi-17 Helicopter (Pyongyang Sunan Airport)",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/kpaaf_mi-17/",
+      "coord_source": "Young Pioneer Tours: Mi-17 helicopter tours board at Pyongyang Sunan International Airport; Wikipedia airport coords 39°13'26\"N 125°40'12\"E; slight offset from air_koryo_Il-18 to avoid duplicate; uncertain — could be Mirim Airfield if this is a static display"
+    },
+    {
+      "panoid": "kumsusan_palace_of_the_sun",
+      "lat": 39.0585,
+      "lon": 125.7858,
+      "site_name": "Kumsusan Palace of the Sun",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/kumsusan_palace_of_the_sun/",
+      "coord_source": "latitude.to / Wikipedia: Kumsusan Palace of the Sun, 39.0585°N 125.7858°E"
+    },
+    {
+      "panoid": "mangyongdae_native_home",
+      "lat": 38.9911,
+      "lon": 125.6600,
+      "site_name": "Mangyongdae Native Home",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/mangyongdae_native_home/",
+      "coord_source": "Wikipedia: Mangyongdae, 38°59'28\"N 125°39'36\"E (38.9911°N 125.6600°E)"
+    },
+    {
+      "panoid": "mangyongdae_prize_international_marathon",
+      "lat": 39.0396,
+      "lon": 125.7546,
+      "site_name": "Mangyongdae Prize International Marathon (Kim Il Sung Stadium start)",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/mangyongdae_prize_international_marathon/",
+      "coord_source": "latitude.to: Kim Il Sung Stadium 39.0396°N 125.7546°E; Pyongyang Marathon Wikipedia confirms start at Kim Il Sung Stadium or Rungrado; using Kim Il Sung Stadium to distinguish from rungrado_may_day_stadium"
+    },
+    {
+      "panoid": "mansudae_grand_monument_floating_view",
+      "lat": 39.0319,
+      "lon": 125.7533,
+      "site_name": "Mansudae Grand Monument",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/mansudae_grand_monument_floating_view/",
+      "coord_source": "Wikipedia: Mansudae Grand Monument, 39°1'55\"N 125°45'12\"E (39.03194°N 125.75333°E); merged slugs: mansudae_grand_monument_floating_view, mansudae_grand_monument_night"
+    },
+    {
+      "panoid": "monument_to_party_founding",
+      "lat": 39.0278,
+      "lon": 125.7764,
+      "site_name": "Monument to Party Founding",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/monument_to_party_founding/",
+      "coord_source": "Wikipedia: Monument to Party Founding, 39°1'40\"N 125°46'35\"E (39.02778°N 125.77639°E)"
+    },
+    {
+      "panoid": "pohyon_buddhist_temple",
+      "lat": 40.0083,
+      "lon": 126.2350,
+      "site_name": "Pohyonsa (Pohyon Buddhist Temple)",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/pohyon_buddhist_temple/",
+      "coord_source": "Wikipedia: Pohyonsa, 40°0'30\"N 126°14'6\"E (40.00833°N 126.23500°E)"
+    },
+    {
+      "panoid": "rungrado_may_day_stadium",
+      "lat": 39.0497,
+      "lon": 125.7753,
+      "site_name": "Rungrado 1st of May Stadium",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/rungrado_may_day_stadium/",
+      "coord_source": "Wikipedia: Rungrado 1st of May Stadium, 39°02'59\"N 125°46'31\"E (39.0497°N 125.7753°E); merged slugs: rungrado_may_day_stadium, arirang2013 (Arirang Mass Games 2013 performed at this stadium)"
+    },
+    {
+      "panoid": "samjiyon_grand_monument",
+      "lat": 41.8304,
+      "lon": 128.3335,
+      "site_name": "Samjiyon Grand Monument",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/samjiyon_grand_monument/",
+      "coord_source": "Wikipedia: Samji Lake, 41°49'49\"N 128°20'01\"E (41.83041°N 128.333519°E); monument is on shore of Lake Samji; city of Samjiyon at 41°48'N 128°19'E; using lake coords as monument is at lakeside"
+    },
+    {
+      "panoid": "sariwon_migok",
+      "lat": 38.5100,
+      "lon": 125.7600,
+      "site_name": "Sariwon Migok Cooperative Farm",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/sariwon_migok/",
+      "coord_source": "Farm on outskirts of Sariwon city (Sariwon coords: 38.5038°N 125.7558°E from latitude.to); farm slightly NE of city centre — estimated 38.510°N 125.760°E; merged slugs: sariwon_migok, farmer_house (confirmed by DPRK 360 rural-north-korea article)"
+    },
+    {
+      "panoid": "sci_tech_complex",
+      "lat": 38.9888,
+      "lon": 125.7124,
+      "site_name": "Pyongyang Sci-Tech Complex",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/sci_tech_complex/",
+      "coord_source": "Wikipedia: Pyongyang Sci-Tech Complex, 38°59'19.68\"N 125°42'44.64\"E (38.9888°N 125.7124°E); on Ssuk Island in Taedong River"
+    },
+    {
+      "panoid": "victorious_fatherland_liberation_war_museum",
+      "lat": 39.0383,
+      "lon": 125.7406,
+      "site_name": "Victorious Fatherland Liberation War Museum",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/victorious_fatherland_liberation_war_museum/",
+      "coord_source": "Wikipedia: Victorious War Museum, 39°02'18\"N 125°44'26\"E (39.03833°N 125.74056°E); merged slugs: victorious_fatherland_liberation_war_museum, virtual_gallery_anti_us_war_posters (anti-US war posters gallery is housed in this museum)"
+    },
+    {
+      "panoid": "yanggakdo_hotel",
+      "lat": 38.9989,
+      "lon": 125.7512,
+      "site_name": "Yanggakdo International Hotel",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/yanggakdo_hotel/",
+      "coord_source": "Wikipedia: Yanggakdo International Hotel, 38°59'56.16\"N 125°45'4.15\"E (38.9989333°N 125.7511528°E)"
+    },
+    {
+      "panoid": "yeonmijeong",
+      "lat": 37.9717,
+      "lon": 126.5600,
+      "site_name": "Yeonmijeong Pavilion, Kaesong",
+      "country": "KP",
+      "tour_url": "https://dprk360.com/360/yeonmijeong/",
+      "coord_source": "Yeonmijeong is a historic pavilion in Kaesong old town (UNESCO World Heritage area); Kaesong Wikipedia coords 37.9717°N 126.5528°E used as base; slightly offset to 126.5600 to distinguish from kaesong_old_town row; pavilion is in central Kaesong historic district"
+    }
+  ]
+}
