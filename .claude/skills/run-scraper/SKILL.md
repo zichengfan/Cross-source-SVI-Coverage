@@ -11,15 +11,12 @@ run survives an SSH disconnect or the agent session ending.
 
 ## 1. Pick the command
 
-- **Point-probe providers** (streetlevel-native: `kakao`, `mapy`, `naver`, ...)
-  → `fetch-probe`
-- **Tile providers** (`yandex`, `baidu`, `kartaview`, `svmap_google`, ...)
-  → `fetch-provider`
+All providers use `fetch-provider`.
 
 Always **dry-run first** to size the job:
 
 ```bash
-.venv/bin/python -m coverage_acquisition.cli fetch-probe \
+.venv/bin/python -m coverage_acquisition.cli fetch-provider \
   --provider <key> --bbox <min_lon> <min_lat> <max_lon> <max_lat> \
   --output-root data/raw --dry-run
 ```
@@ -32,14 +29,14 @@ inspectable (the runner prints its manifest JSON on completion):
 ```bash
 tmux new-session -d -s scrape-<key> \
   "cd /data2/shared/Cross-source-SVI-Coverage && \
-   MPLCONFIGDIR=/tmp/mpl .venv/bin/python -m coverage_acquisition.cli fetch-probe \
+   MPLCONFIGDIR=/tmp/mpl .venv/bin/python -m coverage_acquisition.cli fetch-provider \
      --provider <key> --bbox <min_lon> <min_lat> <max_lon> <max_lat> \
      --output-root data/raw --run-label <label> \
      2>&1 | tee data/raw/<key>_<label>.log"
 ```
 
-Keep `--requests-per-second` conservative (default 1.0) — this is a polite
-scrape. Do not run many large scrapes against the same host at once.
+Use provider defaults unless the provider subplan says otherwise. Do not run
+many large scrapes against the same host at once.
 
 ## 3. Monitor
 
@@ -54,8 +51,8 @@ the output directory persist. Done = session gone + `manifest.json` written.
 
 ## 4. Outputs
 
-`data/raw/<key>_streetlevel/<run_label>/` (point-probe) contains:
-`pano_records.csv`, `coverage_points.parquet`, `manifest.json`.
+`data/raw/<key>_coverage/<run_label>/` contains the stored source responses and
+`manifest.json`.
 
 ## 5. After the scrape
 

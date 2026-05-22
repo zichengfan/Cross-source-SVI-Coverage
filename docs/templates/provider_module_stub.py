@@ -21,7 +21,7 @@ PROVIDER = ProviderDefinition(
     sources=(
         SourceDefinition(
             id="<key>_source",
-            kind="raster",  # raster | vector_mvt | coverage_json | streetlevel | ...
+            kind="raster",  # raster | vector_mvt | coverage_json | json_api | ...
             template="https://<endpoint>/{z}/{x}/{y}",
             headers={
                 "User-Agent": "global-svi-coverage-observatory/0.3",

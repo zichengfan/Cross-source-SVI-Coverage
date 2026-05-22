@@ -151,21 +151,3 @@ class FetchAreaRequest:
     dry_run: bool = False
     access_token: str | None = None
     extra_headers: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class ProbeFetchRequest:
-    """Request for streetlevel-native point-probe coverage acquisition."""
-
-    provider: str
-    bbox: BoundingBox
-    output_root: Path
-    coarse_spacing_m: float = 1500.0
-    fine_spacing_m: float = 150.0
-    radius_m: float = 100.0
-    requests_per_second: float = 1.0
-    mask_path: Path | None = None
-    concurrency: int = 8
-    two_pass: bool = True
-    run_label: str | None = None
-    dry_run: bool = False

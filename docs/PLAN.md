@@ -15,7 +15,7 @@ agent/skill tooling that makes the per-provider work repeatable and parallel.
 | Provider scope | **Active + scrapable, tiered** (T1/T2/T3); skip defunct, re-hosters, paid-B2B-no-viewer |
 | Spatial sequencing | **Pilot city first**, then full extent |
 | Extent strategy | **Two-pass discovery** — low-zoom sweep finds coverage, then z14 fetch |
-| `streetlevel` lib | Adopt as a **source kind** for the providers it supports |
+| Source kinds | Use provider-native coverage endpoints via pluggable raster/vector/JSON handlers |
 | Vector → raster | **Burn geometry; buffer isolated points** by ~one cell |
 | Point metadata | **Kept in `data/intermediate`** as source of truth; raster is published |
 | Code layout | **Per-provider Python modules**, auto-registered (conflict-free parallel work) |
@@ -50,7 +50,7 @@ HeliEngadin, MappointAsia, Rutmap (no URL / unidentifiable).
 
 | Tier | Providers (proposed `key`) |
 |---|---|
-| **T1** streetlevel-native | `kakao`, `naver`, `mapy`, `ja360` |
+| **T1** initial raster/coverage providers | `kakao`, `naver`, `mapy`, `ja360` |
 | **T2** public / documented scrapers | `tencent`, `mapilio`, `streetview_vn`, `mappy`, `barikoi`, `dprk360`, `carte_ma` |
 | **T3** likely / unverified / gated | `mappls`, `krak`, `tuttocitta`, `gjirafa`, `finn_no`, `eniro`, `asig`, `egmedia`, `ru09_tomsk`, `mapjack`, `myisfahan`, `istanbul_ibb`, `xygo`, `kuwait_finder`, `cyclomedia_phila` |
 
@@ -77,16 +77,15 @@ CycloMedia is paid-B2B but has a free public viewer (Philadelphia
 One or a few `foundation`-labelled PRs, built by Claude (not parallelized):
 
 1. **uv project** — finalize `pyproject.toml`, `uv sync`, `.venv` (done: draft
-   exists; add `streetlevel`, `rasterio`, `geopandas`, `shapely`, `pystac`,
-   `rio-cogeo`, `python-dotenv`).
+   exists; add `rasterio`, `geopandas`, `shapely`, `pystac`, `rio-cogeo`,
+   `python-dotenv`).
 2. **Provider registry refactor** — split `providers.py` into
    `providers/<key>.py`; each calls `register_provider(PROVIDER)`; a registry
    module auto-discovers them on import. Existing 7 migrate as-is.
 3. **Pluggable source kinds** — move per-kind fetch/decode logic into
    `source_kinds/<kind>.py`, auto-registered, so `runners.py` becomes a thin
    dispatcher. A new kind = a new file = still conflict-free. Seed kinds:
-   `raster`, `vector_mvt`, `coverage_json`, plus new `streetlevel`,
-   `vector_geojson`, `json_api`.
+   `raster`, `vector_mvt`, `coverage_json`, `vector_geojson`, `json_api`.
 4. **Rasterization module** (`rasterize.py`) — stored tiles **or** vector
    features → z14 binary COG; buffers isolated points by ~1 cell; uses
    `rasterio`/`shapely`/`geopandas`.
@@ -261,9 +260,9 @@ title `[<tier>] <Provider name> (<key>)`. The PR for the provider uses
 ## 11. Execution roadmap
 
 - **Phase 0 — Foundation.** Items in §4. Claude-built. ~1 working block.
-- **Phase 1 — T1 (4 providers).** streetlevel-native; validates the
-  `streetlevel` source kind and the whole pipeline end-to-end. One batch. The
-  first provider also wires the `rasterize` / `catalog` CLI integration
+- **Phase 1 — T1 (4 providers).** Initial regional providers using raster or
+  coverage endpoints; validates the provider pipeline end-to-end. One batch.
+  The first provider also wires the `rasterize` / `catalog` CLI integration
   (fetch-output → z14 COG → STAC) against real provider output.
 - **Phase 2 — T2 (7 providers).** Public/documented scrapers. Two batches.
 - **Phase 3 — T3 (~14 providers).** Likely/unverified/gated. Three batches;

@@ -34,7 +34,7 @@ implementation subplan. You do **not** write provider code.
 5. Pick a **pilot city** inside the provider's coverage and a small bbox for it,
    plus a pass-1 discovery region bbox and zoom for two-pass extent discovery.
 6. Map the provider to an existing **source kind** (`raster`, `vector_mvt`,
-   `coverage_json`, `streetlevel`, ...). If a genuinely new kind is needed, say
+   `coverage_json`, `json_api`, ...). If a genuinely new kind is needed, say
    so explicitly — that is a separate foundation PR, not part of this provider.
 
 ## Output
