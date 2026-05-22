@@ -1,303 +1,384 @@
-# [T1] Provider: Mapy.com / Mapy.cz (`mapy`)
+# [T1] Provider: Mapy.com / Mapy.cz (`mapy`) — REDESIGN to raster overlay tiles
 
 <!--
 This file is the provider's implementation subplan AND its GitHub issue body.
 provider-scout fills it. It must be complete enough to implement the provider
 from this file alone. It requires USER APPROVAL before any issue/branch/code.
+
+REDESIGN NOTE (2026-05-21): mapy was previously specced as a `streetlevel`
+point-probe provider (FRPC `getbest` per point). Scouting the live Mapy.com
+viewer found that the Panorama coverage overlay IS a real raster `{z}/{x}/{y}`
+PNG tile layer. This file is rewritten as a `kind="raster"` provider mirroring
+`svmap_google.py` / `yandex.py`. All streetlevel / FRPC / point-query language
+has been removed.
 -->
 
 ## 1. Summary
 
 Mapy.com (formerly Mapy.cz) is the dominant Czech web-mapping service, operated
 by Seznam.cz. It offers a "Panorama" street-level imagery layer with extensive
-coverage of the Czech Republic (and effectively only the Czech Republic — see
-§2). Imagery is a mix of Seznam's own car-captured panoramas and, for 2020+
-coverage, Cyclomedia panoramas. It is in scope as an active provider that is
-natively supported by the `streetlevel` Python library (already an installed
-dependency), making it a Tier-1 "streetlevel-native" provider. There is no tile
-or vector coverage layer to scrape; coverage is discovered by point queries
-against Mapy's FRPC panorama API through `streetlevel.mapy`.
+coverage of the **Czech Republic only** (the entire country was re-imaged
+2021–2023, one-third per year west-to-east, plus 21 cities re-shot). It is in
+scope as an active, scrapable provider: its public web viewer draws a
+**panorama coverage overlay as raster `{z}/{x}/{y}` PNG tiles** served from
+`mapserver.mapy.cz`, requiring no authentication. This project fetches that
+overlay-tile layer and rasterizes it onto the shared z14 grid — exactly the
+`kind="raster"` pattern used by `svmap_google` and `yandex`. Only coverage
+presence is stored; no panorama imagery is downloaded.
 
 ## 2. Research findings (filled by provider-scout)
 
+### Verdict: Mapy serves a RASTER overlay tile layer
+
+The Panorama coverage overlay is **raster `{z}/{x}/{y}` PNG tiles** — not vector
+MVT, and not purely client-side. mapy **can** be redesigned as a `kind="raster"`
+provider. Evidence below was gathered from the live viewer JS bundle and by
+probing the tile host directly.
+
 - **Homepage / public viewer URL:**
-  - Homepage: `https://mapy.com/` (also `https://en.mapy.cz/`).
-  - Panorama viewer: open a pano permalink, e.g.
-    `https://en.mapy.cz/zakladni?pano=1&pid=<panoid>&...` (see
-    `streetlevel.mapy.util.build_permalink`).
-  - Tier: **T1** (streetlevel-native).
+  - Homepage / viewer: `https://mapy.com/` (legacy `https://en.mapy.cz/`
+    301-redirects to `https://mapy.com/en/...`).
+  - Viewer with the Panorama layer enabled:
+    `https://mapy.com/en/zakladni?pano=1&x=14.42158&y=50.08756&z=17`.
+  - Tier: **T1**.
 
-- **Coverage endpoint(s):** Mapy exposes **no tile-based coverage layer** (no
-  raster tiles, no MVT, no per-tile coverage JSON). Coverage is queried point by
-  point through Seznam's FRPC (Fast Remote Procedure Call, a binary RPC) API.
-  All access is wrapped by `streetlevel.mapy`; do **not** call the endpoint
-  directly.
-  - Endpoint: `https://pro.mapy.cz/panorpc` (FRPC; `pyfrpc.FrpcClient`).
-  - Method used for discovery: FRPC procedure **`getbest`**, args
-    `(lon, lat, radius, options)` — finds the best panorama within `radius`
-    metres of a point. Returns `status == 200` with a `panInfo` dict when
-    imagery exists, or `status != 200` when none exists nearby.
-  - Other procedures (`detail`, `getneighbours`) exist for metadata/links but
-    are **not needed** for coverage presence; `getneighbours` may optionally be
-    used later to densify discovered coverage (see Known quirks).
-  - Required header (set automatically by `streetlevel`):
-    `Referer: https://en.mapy.cz/` — without it, Cyclomedia (2020+) panoramas
-    are not returned.
-  - The library entry point is `streetlevel.mapy.find_panorama(lat, lon,
-    radius=100.0, year=None, links=True, historical=True)`:
-    - `links` / `historical` each trigger **extra** network requests. For
-      coverage discovery they MUST be set to `links=False, historical=False` to
-      keep one request per probe point.
+- **How the overlay was identified.** The viewer is a JS SPA; the coverage
+  overlay is created in the app bundle `https://mapy.com/js/userweb.<ver>.js`
+  (`userweb.2.81.6.js` at scout time). The relevant call:
 
-- **Coordinate scheme:** `web_mercator` for the project's z14 grid. The
-  provider API itself takes/returns plain **WGS84 lat/lon** (EPSG:4326). No
-  custom datum shift (unlike Baidu/Yandex). Probe points are generated as
-  WGS84 lat/lon; presence results are WGS84 lat/lon points that get burned onto
-  the standard web-mercator z14 raster.
+  ```js
+  createPanoLayer("pano-layer", {
+    pointsUrl: `${mapserver.url}/panorama_pt_hybrid-m/`,
+    lineUrl:   `${mapserver.url}/panorama_ln_hybrid-m/`,
+    pointsZoom: 19,
+  })
+  ```
 
-- **Zoom range / tile size / response format:** Not tile-based. There is no
-  "zoom" for coverage. The "zoom" levels in `streetlevel` (`max_zoom` 0/1/2)
-  refer to *panorama image* resolution, which this project does NOT download.
-  - Response format: a Python dict decoded from FRPC by `pyfrpc`. A successful
-    `getbest` returns `{"status": 200, "result": {"panInfo": {...}}}`.
-    `streetlevel.mapy.parse_getbest_response` turns `panInfo` into a
-    `MapyPanorama` dataclass.
-  - `MapyPanorama` fields used by this project:
-    `id` (int pano ID), `lat`, `lon` (WGS84, the *actual* pano location, which
-    may differ slightly from the probe point), `date` (`datetime`, tz-aware,
-    UTC), `provider` (str, e.g. `"cyclomedia"` or a Seznam label), `elevation`.
+  The pano layer class extends `SMap.Layer.Canvas` with `SMap.LAYER_TILE`: it is
+  a **raster tile canvas layer**. It loads each tile as `new Image()`
+  (`_drawTile`) — i.e. PNG raster, not MVT. Two sub-layers:
+  - **`panorama_ln_hybrid-m/`** — the coverage **lines** layer ("panorama exists
+    on this street"). Used at zoom `< pointsZoom (19)`. **This is the layer this
+    project scrapes.**
+  - **`panorama_pt_hybrid-m/`** — the coverage **points** layer, used only at
+    zoom ≥ 19 (individual pano dots). Not needed for z14 coverage.
 
-- **Auth:** **none.** No API key, token, or cookie. The only required header is
-  `Referer: https://en.mapy.cz/`, which `streetlevel` sets internally. **No
-  `.env` key is needed** for `mapy`.
+- **Coverage endpoint(s):**
+  - **Line overlay (use this):**
+    `https://mapserver.mapy.cz/panorama_ln_hybrid-m/{z}-{x}-{y}`
+  - Point overlay (reference only):
+    `https://mapserver.mapy.cz/panorama_pt_hybrid-m/{z}-{x}-{y}`
+  - **HTTP method:** `GET`.
+  - **Tile path format:** the SMap SDK's default tile query is
+    `"{zoom}-{x}-{y}"` (`SMap.Layer.Tile.DEFAULT_OPTIONS`), i.e. the path
+    segment is a single token `{z}-{x}-{y}` (hyphen-separated, NOT a
+    `/{z}/{x}/{y}/` directory tree). The pano layer passes no custom `query`,
+    so it uses this default.
+  - **Query params:** the viewer appends `?sdk=<token>` (and optionally
+    `&apikey=<key>` if a Loader API key is set). **Scouting confirmed these are
+    NOT required** — `GET .../panorama_ln_hybrid-m/14-8848-5550` with no query
+    string returns `200 image/png`. Do not send `sdk`/`apikey`.
+  - **Host shard `#`:** the SMap SDK supports a `#` placeholder in tile URLs
+    replaced by a shard digit `1 + ((x + y) & 3)`. The pano layer's
+    `lineUrl`/`pointsUrl` contain **no `#`**, so there is a single host
+    (`mapserver.mapy.cz`) and no sharding to implement.
+  - **Required headers:** `Referer: https://mapy.com/` is **required** — not
+    merely polite. Re-verified live 2026-05-22: an empty tile fetched *without*
+    a `Referer` returns **HTTP 403** (153-byte `text/html`); *with* the
+    `Referer` it returns the documented `302 → ./default` (see Presence rule).
+    Covered tiles return `200 image/png` either way. Always send a descriptive
+    `User-Agent`, `Referer: https://mapy.com/`, and
+    `Accept: image/png, image/*;q=0.9, */*;q=0.1` — the `SourceDefinition.headers`
+    in §4 already do. (Earlier scout text "no headers required" was wrong for
+    the empty-tile path.)
 
-- **Presence rule:** For each probe point `(lat, lon)`, call
-  `find_panorama(lat, lon, radius=R, links=False, historical=False)`:
-  - returns a `MapyPanorama` → imagery is present at that point; record the
-    returned pano (`id`, `lat`, `lon`, `date`, `provider`) as a coverage point.
-  - returns `None` → no imagery within `radius` metres of that point.
-  The z14 raster cell is marked **covered (1)** if any discovered pano falls in
-  it, **checked-empty (0)** for probed cells with no pano, **nodata (255)**
-  for cells never probed. Discovered panos are deduplicated by pano `id`.
+- **Coordinate scheme:** `web_mercator` (standard EPSG:3857 / WGS84 spherical
+  Mercator, 256-px tiles, the same XYZ scheme as OSM and `svmap_google`).
+  Verified by probing: Prague centre (50.0875 N, 14.4213 E) →
+  `z14 = 14-8848-5550`, returned a filled tile; Atlantic ocean
+  (`14-6371-6759`) and Vienna (`14-8937-5681`) returned empty tiles. No custom
+  datum shift (unlike Baidu/Yandex).
+
+- **Zoom range / tile size / response format:**
+  - **Tile size:** 256 × 256 PNG (`SMap.Layer.Tile.DEFAULT_OPTIONS.tileSize =
+    256`). Confirmed: every probed tile is `PNG image data, 256 x 256`.
+  - **Native zoom range of the line layer:** renders from **z7 up to ~z20**.
+    Probed Prague tiles at z7,8,9,10,11,12,14,16,18 → all filled PNG; z20 → a
+    small filled PNG; z21 → empty (redirect to `default`). The line layer is
+    fully usable at the project's analysis zoom **z14** and at coarse discovery
+    zooms (z8–z9).
+  - **Response format:** 8-bit colormap / RGBA PNG. Filled tiles draw
+    semi-transparent **red** coverage lines (see colors below). The empty tile
+    is a fully-transparent 256×256 PNG (see Presence rule).
+  - Content-Type: `image/png`. Filled tiles `cache-control: max-age=86400`.
+
+- **Auth:** **none.** No API key, token, cookie, or `sdk` value is required —
+  confirmed by direct probing. **No `.env` key is needed** for `mapy`.
+
+- **Presence rule:** Each fetched tile is decoded as a PNG; **a tile shows
+  coverage iff it contains ≥ 1 pixel with alpha > 0** (i.e. any non-transparent
+  pixel — the red coverage lines). Two equivalent empty signals were observed:
+  1. **HTTP 302 redirect.** An empty tile responds `302 Found` with
+     `location: ./default`. `urllib.request.urlopen` (used by
+     `polite.polite_fetch`) **follows 302 automatically**, so the fetcher
+     transparently receives the redirect target.
+  2. **The `default` placeholder PNG.** The redirect target
+     `https://mapserver.mapy.cz/panorama_ln_hybrid-m/default` is a **442-byte,
+     256×256, fully-transparent PNG** (0 opaque pixels — verified). Every empty
+     tile resolves to this exact placeholder.
+  Therefore the implementer does **not** need to special-case the 302: just
+  decode whatever PNG `polite_fetch` returns and test `coverage_pixel_count`.
+  This is the **same empty-tile rule already implemented for Yandex STV** in
+  `source_kinds/raster.py` (`is_yandex_stv_source` → `coverage_pixel_count == 0`
+  ⇒ `is_empty`). See §4 for the small generalization needed.
+  - z14 raster cell mapping: a tile that contains coverage pixels →
+    contributing cells **covered (1)**; a probed tile with zero coverage pixels
+    → **checked-empty (0)**; never-probed cells → **nodata (255)**. (Standard
+    raster-kind → `rasterize.py` flow.)
+
+- **Filled-tile colors (for rasterization / sanity checks):** coverage lines are
+  semi-transparent red. Dominant pixel values observed on Prague/Brno z14 tiles:
+  - core line `rgba(253, 0, 0, 128)` (by far the most common),
+  - antialias / outline shades `rgba(246,0,0,~130)`, `rgba(242,0,0,~133)`,
+    `rgba(205,0,0,~233)`, `rgba(205,0,0,~237)`.
+  All coverage pixels are pure-ish red (`R` high, `G=0`, `B=0`) with partial
+  alpha. The rasterizer should treat **any alpha > 0** as coverage; the
+  red-only palette is a useful cross-check but not the presence test.
 
 - **robots.txt / ToS notes; observed rate limit:**
-  - `https://en.mapy.cz/robots.txt` responded `200` with an **empty body** (no
-    `Disallow` rules served). `https://pro.mapy.cz/robots.txt` returns
-    `405 Not Allowed` (the FRPC host is not a normal web host).
-  - The FRPC panorama API is undocumented/unofficial; `streetlevel` is the
-    de-facto community client. Mapy's general Terms of Use restrict bulk reuse
-    of content; this project stores only **coverage presence** (point
-    locations + dates), not panorama imagery, which is the lighter-touch use.
-    **Record this caveat in the provider module docstring** and keep probing
-    polite.
-  - No published rate limit. Observed latency in scouting: a cold `getbest`
-    call ~0.6–2.6 s; treat the API as slow and rate-limited in practice. Use a
-    conservative throttle (target ≈ **1 request/second**, with retry/backoff).
-  - **Polite-scraper caveat:** `streetlevel.mapy` uses its own `pyfrpc` client
-    and does NOT route through this project's `polite.polite_fetch`. The
-    `streetlevel` source kind (foundation) must therefore implement throttle +
-    retry/backoff itself around each `find_panorama` call (see §4).
+  - `https://mapy.com/robots.txt` and `https://en.mapy.cz/robots.txt` both
+    return **HTTP 200 with an empty body** (`content-length: 0`) — no `Disallow`
+    rules served, so `robots_allows()` returns `True`. `mapserver.mapy.cz` (the
+    tile host) — fetch its `/robots.txt` during implementation and record the
+    result in the status log; an empty/absent robots.txt → allowed.
+  - The `panorama_ln_hybrid-m` tile endpoint is undocumented (the public
+    Developer Mapy REST API exposes only `basic`/`outdoor`/`aerial`/
+    `names-overlay`/`winter` map sets — no panorama overlay). Mapy's general
+    Terms of Use restrict bulk reuse of map content; this project stores only a
+    **binary coverage raster** (presence, not imagery, not the rendered tiles
+    themselves long-term). **Record this caveat in the provider module
+    docstring** and keep the scrape polite and small.
+  - No published rate limit. Tiles are CDN-cached (`envoy` server,
+    `cache-control: max-age=86400` on filled tiles). Use a conservative
+    per-host throttle (≈ 4–5 req/s; `PolitePolicy(min_interval_seconds≈0.2)`)
+    with the shared retry/backoff. Czech Republic is small enough that a full
+    z14 scrape is modest (see §4).
 
 - **Known quirks / gotchas:**
-  - **No tile endpoint** — this is the defining quirk. The provider cannot use
-    `raster` / `vector_mvt` / `coverage_json` kinds. It needs the new
-    `streetlevel` source kind, which discovers coverage by **probing a grid of
-    points** instead of fetching tiles.
-  - **Probe grid spacing.** z14 cells are ~9.5 m at the equator and ~6.1 m at
-    Czech latitude (~49.8° N: cos49.8°≈0.646 → ~9.5×0.646 ≈ 6.1 m). A single
-    z14 cell is far smaller than a sensible probe radius. Probe on a **coarser
-    grid** (e.g. one probe every ~150–250 m) with `radius` ≈ half the grid
-    spacing so probes tile the area without large gaps; each returned pano is
-    then burned into whatever z14 cell its true `lat/lon` lands in. Discovery
-    is two-pass (§4): a coarse pass finds populated regions, a finer pass
-    densifies them. Document the chosen spacing/radius in the module.
-  - **Pano location ≠ probe location.** `getbest` returns the nearest pano,
-    whose `lat/lon` can be up to `radius` metres from the probe point. Always
-    rasterize the **returned** `lat/lon`, never the probe point.
-  - **Coverage is Czech-only in practice.** Scouting confirmed panos in Prague,
-    Brno, Ostrava; **no** panos in Bratislava (SK), Vienna (AT), or the High
-    Tatras (SK). Treat the discovery region as the Czech Republic bbox; do not
-    waste probes outside it.
-  - **`provider` field varies.** 2020+ panos report `provider == "cyclomedia"`;
-    older ones report a Seznam label. Both count as Mapy coverage; keep the
-    `provider` string in the intermediate data for provenance only.
-  - **Dates are exposed** (`MapyPanorama.date`, tz-aware UTC `datetime`), and
-    `historical=True` returns prior-year panos at the same spot via the
-    `panInfo["timeline"]` years. The optional `*_year.tif` date layer can use
-    `date.year` of the most-recent pano per cell. The base coverage scrape uses
-    `historical=False` (one request/probe); a date layer, if built, is a
-    follow-up that may re-probe with `historical=True`.
-  - **FRPC dependency.** `streetlevel.mapy` pulls in `pyfrpc`; it is already
-    installed transitively via `streetlevel`. No extra dependency to add.
-  - **`getbest` arg order.** `streetlevel`'s `find_panorama` takes `(lat, lon)`
-    but the underlying FRPC call passes `(lon, lat, radius, options)` — always
-    go through `streetlevel`, never hand-build the FRPC args.
-  - `find_panorama` raises on network/transport errors (it does not return
-    `None` for those); the source kind must catch transport exceptions and
-    retry, distinct from a legitimate `None` (no coverage).
+  - **Non-standard tile path token.** The path segment is `{z}-{x}-{y}`
+    (hyphens), not `/{z}/{x}/{y}`. The `template` in `SourceDefinition` must use
+    `panorama_ln_hybrid-m/{z}-{x}-{y}`. The runner's web-mercator tile
+    enumeration still produces ordinary integer `z/x/y`; only the URL string
+    differs.
+  - **Empty tile = 302 → transparent `default` PNG.** Not a 404, not a 204.
+    A naive "skip on 404" will never trigger; rely on the transparent-PNG
+    presence rule. `polite_fetch` follows the 302 and returns the placeholder
+    PNG with `http_status == 200` and `content_type == image/png`.
+  - **Two sub-layers — use `panorama_ln_hybrid-m` (lines), not
+    `panorama_pt_hybrid-m` (points).** The points layer only renders at z ≥ 19
+    and is sparse; the lines layer is the contiguous coverage footprint and
+    renders at every zoom the project needs.
+  - **Czech-only coverage.** Confirmed: filled tiles over Prague, Brno,
+    Ostrava, Tábor; empty (302→default) over Vienna (AT) and ocean. Restrict
+    the discovery region to the Czech Republic bbox; do not waste fetches
+    outside it.
+  - **No dates in the overlay.** The raster tiles encode presence only — no
+    per-pixel capture date. A `mapy_year.tif` date layer is **out of scope** for
+    this raster redesign (dates would require the separate FRPC `getbest`
+    metadata path; defer as a possible follow-up, not part of this provider).
+  - **`sdk`/`apikey` query params.** The viewer sends them but the endpoint
+    does not require them; omit them. If Mapy ever starts enforcing the `sdk`
+    token, the value derives from `SMap.getSDKHeaderValue()` in the SDK bundle —
+    flagged here only as a fallback, not implemented now.
+  - **No host sharding.** Single host `mapserver.mapy.cz`; the SDK `#`
+    shard-placeholder is unused by the pano layer.
 
 ## 3. Test plan (write these FIRST — red before green)
 
-Unit tests must not hit the network. `streetlevel.mapy.find_panorama` is
-**monkeypatched/mocked** to return canned `MapyPanorama` objects or `None`, and
-canned FRPC dicts are stored as fixtures.
+Unit tests must not hit the network. Decode small recorded PNG fixtures under
+`tests/fixtures/mapy/`.
 
 - [ ] `test_mapy_registers` — importing `coverage_acquisition.providers.mapy`
       registers `"mapy"` in `PROVIDERS`; `get_provider("mapy")` returns a
-      `ProviderDefinition` whose `key == "mapy"` and that has ≥1 source.
-- [ ] `test_mapy_source_kind_is_streetlevel` — the provider's single
-      `SourceDefinition.kind == "streetlevel"` and its `options` name the
-      streetlevel client (`options["streetlevel_module"] == "mapy"`).
+      `ProviderDefinition` whose `key == "mapy"` with exactly one source.
+- [ ] `test_mapy_source_kind_is_raster` — the provider's single
+      `SourceDefinition.kind == "raster"`.
 - [ ] `test_mapy_coordinate_scheme` — `PROVIDER.coordinate_scheme ==
-      "web_mercator"` (probe grid + raster are standard web mercator).
-- [ ] `test_mapy_probe_grid_build` — given the pilot bbox and the configured
-      probe spacing, the grid generator yields the expected count and the
-      expected first/last `(lat, lon)` probe points (deterministic, no network).
-- [ ] `test_mapy_decode_present` — feeding the `streetlevel` source-kind
-      decoder a mocked `find_panorama` that returns a `MapyPanorama`
-      (`id=104046742`, `lat=50.08756`, `lon=14.42158`, `date` 2023-08-11,
-      `provider="cyclomedia"`) yields a `DecodeResult` with `pano_count == 1`
-      and one `pano_records` entry carrying `panoid`, `lat`, `lon`,
-      `timestamp` (the ISO date), and `provider`.
-- [ ] `test_mapy_decode_absent` — a mocked `find_panorama` returning `None`
-      yields `DecodeResult` with `pano_count == 0`, `is_empty == True`, and no
-      `pano_records`.
-- [ ] `test_mapy_decode_uses_returned_location` — when the mocked pano's
-      `lat/lon` differs from the probe point, the recorded coverage point uses
-      the **pano's** `lat/lon`, not the probe point's.
-- [ ] `test_mapy_dedup_by_panoid` — two probes that resolve to the same pano
-      `id` collapse to a single coverage record.
-- [ ] `test_mapy_no_auth_required` — the provider needs no token: the
-      `SourceDefinition` has no `token_query_param` and no `.env` key is
-      referenced.
-- [ ] `test_mapy_transport_error_retries` — when the mocked `find_panorama`
-      raises a transport error then succeeds, the source kind retries and does
-      not mark the cell empty (retry/backoff path, distinct from `None`).
-- Fixtures under `tests/fixtures/mapy/`:
-  - `getbest_present.json` — a recorded `getbest` response dict (status 200,
-    `result.panInfo`) for the Prague pilot point, used to build a real
-    `MapyPanorama` via `parse_getbest_response` without the network.
-  - `getbest_absent.json` — a recorded `getbest` response with `status != 200`
-    (ocean point), decoding to `None`.
-  - Record these once with a tiny throwaway script during implementation
-    (`streetlevel.mapy.api.MapyApi().getbest(...)`), then commit them small.
+      "web_mercator"`.
+- [ ] `test_mapy_tile_url_build` — formatting the source `template` with
+      `z=14, x=8848, y=5550` yields exactly
+      `https://mapserver.mapy.cz/panorama_ln_hybrid-m/14-8848-5550`
+      (hyphen-joined token, no `/{z}/{x}/{y}/` tree, no `sdk`/`apikey` params).
+- [ ] `test_mapy_decode_present` — feeding the `raster` decoder the
+      `tile_prague_z14.png` fixture yields a `DecodeResult` with
+      `coverage_pixel_count > 0` and `is_empty is False`; the stored payload is
+      written.
+- [ ] `test_mapy_decode_empty` — feeding the `raster` decoder the
+      `tile_empty_default.png` fixture (the 442-byte transparent placeholder)
+      yields `DecodeResult` with `coverage_pixel_count == 0` and
+      `is_empty is True`; no tile file is written.
+- [ ] `test_mapy_empty_tile_rule_wired` — the `mapy` source carries the option
+      that activates transparent-PNG empty detection in `source_kinds/raster.py`
+      (see §4 — `options["empty_tile_rule"] == "transparent_png"` or the agreed
+      key), so a fully-transparent tile is classified `is_empty`.
+- [ ] `test_mapy_no_auth_required` — the `SourceDefinition` has no
+      `token_query_param`; the module references no `.env` key.
+- [ ] `test_mapy_coverage_color_is_red` — (optional, defensive) on
+      `tile_prague_z14.png`, every opaque pixel has `R > 0, G == 0, B == 0`
+      (the coverage palette is red-only), guarding against a future endpoint
+      change that would silently alter the layer.
+- Fixtures under `tests/fixtures/mapy/` (record once with a tiny throwaway
+  script, then commit small):
+  - `tile_prague_z14.png` — `GET
+    https://mapserver.mapy.cz/panorama_ln_hybrid-m/14-8848-5550`
+    (a dense, filled Prague tile; ~25 KB).
+  - `tile_empty_default.png` — `GET
+    https://mapserver.mapy.cz/panorama_ln_hybrid-m/default`
+    (the 442-byte fully-transparent placeholder).
+  - `tile_brno_z14.png` — optional second filled tile (`14-8947-5613`) for a
+    rasterization sanity check.
+  - NOTE: the old streetlevel fixtures (`getbest_present.json`,
+    `getbest_absent.json`) from the previous design are obsolete — delete them.
 
 ## 4. Implementation subplan (steps for the implementer — TDD)
 
-- [ ] **Source kind: NEW kind `streetlevel`** — `src/coverage_acquisition/
-      source_kinds/streetlevel.py`. This is a **separate foundation PR that
-      must merge first** (PLAN §4 item 3 already lists `streetlevel` as a
-      seeded kind). The `mapy` provider PR depends on it and must not create or
-      edit it. The `streetlevel` kind differs from the tile-based kinds:
-  - It does **not** fetch HTTP tiles. Instead it consumes a **probe grid** of
-    `(lat, lon)` points (generated from the requested bbox + a probe-spacing
-    option) and, for each point, calls the configured `streetlevel`
-    sub-module's `find_panorama(lat, lon, radius, links=False,
-    historical=False)`.
-  - It implements its **own throttle + retry/backoff** around each call
-    (because `streetlevel` bypasses `polite.polite_fetch`): conservative
-    ≈1 req/s default, exponential backoff on transport errors, a descriptive
-    process identity. Per-provider rate is configurable via `SourceDefinition.
-    options`.
-  - It writes discovered panoramas to `data/intermediate/<key>/` as the
-    re-rasterizable point source of truth (GeoParquet), mirroring how the
-    `coverage_json` kind emits `pano_records`. `DecodeResult` fields reused:
-    `pano_count`, `pano_records`, `is_empty`.
-  - It is driven by the existing two-pass extent runner: pass-1 = coarse probe
-    grid over the discovery region; pass-2 = fine probe grid only over cells
-    where pass-1 found panos.
-  - The kind is selected by `SourceDefinition.kind == "streetlevel"` and the
-    `streetlevel` sub-module name comes from `options["streetlevel_module"]`
-    (here `"mapy"`), so the same kind serves `kakao`, `naver`, `ja360`.
+- [ ] **Source kind: existing `raster`.** No new kind. The provider mirrors
+      `src/coverage_acquisition/providers/svmap_google.py` and
+      `providers/yandex.py`.
+- [ ] **One small shared-file generalization (separate foundation PR first).**
+      `source_kinds/raster.py` currently gates transparent-PNG empty detection
+      behind `is_yandex_stv_source` (`options["config_kind"] ==
+      "yandex_stv_renderer"`). mapy needs the *same* "transparent PNG ⇒ empty"
+      behaviour but is not Yandex. Generalize the check to a provider-agnostic
+      option, e.g. `options.get("empty_tile_rule") == "transparent_png"` (with
+      `yandex_stv_renderer` mapped to it for backward compatibility). **This
+      edits a shared file (`raster.py`), so per `CLAUDE.md` it must land in its
+      own small foundation PR before the `mapy` provider PR** — the `mapy` PR
+      then only adds `providers/mapy.py`. If the reviewer prefers, mapy can
+      instead reuse `config_kind` semantics, but a clean generic key is better.
 - [ ] Write the §3 tests first; confirm they fail (red).
 - [ ] Add `src/coverage_acquisition/providers/mapy.py` defining `PROVIDER` as a
-      `ProviderDefinition` and calling `register_provider(PROVIDER)`. Shape:
-  - `key="mapy"`, `output_namespace="mapy_panorama_points"`,
+      `ProviderDefinition` and calling `register_provider(PROVIDER)`. Shape
+      (mirror `svmap_google.py` / `yandex.py`):
+  - `key="mapy"`, `output_namespace="mapy_panorama_raster"`,
     `run_label_prefix="mapy_panorama"`, `coordinate_scheme="web_mercator"`,
     `default_display_zoom=14`.
   - One `SourceDefinition`:
-    - `id="mapy_panorama_streetlevel"`, `kind="streetlevel"`,
-    - `template=""` (no URL template — the streetlevel kind ignores it; if the
-      `SourceDefinition` requires a non-empty template, set a documentary
-      placeholder such as `"streetlevel://mapy/find_panorama"`),
-    - `options={"streetlevel_module": "mapy", "probe_radius_m": "125",
-      "probe_spacing_m": "200", "requests_per_second": "1",
-      "links": "false", "historical": "false"}`,
-    - `storage_subdir="panorama_points"`,
-    - `notes` describing the FRPC `getbest` discovery mechanism and the
-      Czech-only extent.
+    - `id="mapy_panorama_lines"`, `kind="raster"`,
+    - `template="https://mapserver.mapy.cz/panorama_ln_hybrid-m/{z}-{x}-{y}"`,
+    - `headers={"User-Agent": "global-svi-coverage-observatory/0.3",
+      "Accept": "image/png, image/*;q=0.9, */*;q=0.1",
+      "Referer": "https://mapy.com/"}`,
+    - `storage_subdir="tiles"`,
+    - `expect_content_type_prefix="image/"`,
+    - `options={"empty_tile_rule": "transparent_png"}` (the key agreed in the
+      foundation PR above),
+    - `notes` describing the line overlay, the `{z}-{x}-{y}` hyphen token, and
+      the 302→transparent-`default` empty signal.
   - `area_presets`: declare the pilot bbox inline in this module (do **not**
     add to `_presets.py`).
-  - Module docstring: record the ToS caveat (undocumented FRPC API; only
-    coverage presence + dates are stored, never imagery) and the
-    `Referer: https://en.mapy.cz/` requirement.
+  - Module docstring: record the redesign (was streetlevel, now raster), the ToS
+    caveat (undocumented `panorama_ln_hybrid-m` endpoint; only a binary
+    coverage raster is published, no imagery), and the Czech-only extent.
 - [ ] Implement until the §3 tests pass (green); refactor.
-- [ ] **Pilot fetch:** bbox `14.40 50.075 14.44 50.095` (**Prague — Old Town
-      / city centre**, ~2.8 km × 2.2 km). Expect dense coverage on the central
-      street network. Scouting confirmed a pano at `(50.08756, 14.42158)`,
-      pano id `104046742`. Use `probe_spacing_m≈200`, `probe_radius_m≈125`.
+- [ ] **Pilot fetch:** bbox `14.40 50.075 14.44 50.095` (**Prague — Old Town /
+      city centre**, ~2.8 km × 2.2 km) at display zoom **z14**. Expect dense
+      red coverage on the central street network. Scouting confirmed filled
+      z14 tiles `14-8848-5550` (Prague centre) and `14-8947-5613` (Brno).
 - [ ] Rasterize the pilot area to a z14 COG (EPSG:3857, `uint8`,
-      1=covered / 0=checked-empty / 255=nodata); buffer isolated points by
-      ~1 cell; sanity-check that covered pixels land on Prague streets.
+      1=covered / 0=checked-empty / 255=nodata) via `rasterize.py`; sanity-check
+      that covered pixels land on Prague streets, not ocean.
 - [ ] **Two-pass full extent:** pass-1 discovery region = **Czech Republic
-      bbox** `12.09 48.55 18.86 51.06`, coarse probe grid at spacing
-      ≈ 1000–2000 m (the "discovery zoom" equivalent — there is no tile zoom,
-      so express discovery as a coarse probe spacing, not a `z`). Pass-2:
-      re-probe at spacing ≈ 150–250 m only in the cells where pass-1 found
-      panos. Do **not** probe outside the Czech bbox (no coverage there).
-- [ ] Update the STAC item for `mapy` (extent = discovered coverage envelope,
-      scrape date, tier T1, source endpoint `pro.mapy.cz/panorpc`, ToS notes).
-      Update the inventory status for `mapy`.
+      bbox** `12.09 48.55 18.86 51.06`, discovery zoom **z8** (the line layer
+      renders fine at z8; ~6×4 tiles cover all of Czechia — cheap). Pass-2:
+      fetch z14 tiles only in the discovery cells that showed coverage. The
+      whole Czech Republic at z14 is roughly ~200×180 ≈ 36k tiles worst-case
+      (most are empty/302); two-pass keeps this well bounded. Do **not** fetch
+      outside the Czech bbox.
+- [ ] Update / replace the STAC item for `mapy` (extent = discovered coverage
+      envelope ≈ Czech Republic, scrape date, tier T1, source endpoint
+      `mapserver.mapy.cz/panorama_ln_hybrid-m`, ToS notes). The existing
+      `data/processed/stac/mapy` item from the old design must be regenerated
+      for the raster output. Update the inventory status for `mapy`.
 
 ## 5. Acceptance criteria (checked by provider-verifier)
 
 - All §3 tests pass; `coverage_acquisition.providers.mapy` imports and
   self-registers (`"mapy"` in `PROVIDERS`); CI smoke test (import + register +
   dry-run) passes.
-- Pilot probe run resolves panoramas in central Prague; decoded coverage
-  points land on roads/land in the Czech Republic (not ocean, not outside CZ).
+- The provider's single source is `kind="raster"`,
+  `coordinate_scheme="web_mercator"`; the tile `template` builds the
+  hyphen-token URL `.../panorama_ln_hybrid-m/{z}-{x}-{y}` with no auth params.
+- Pilot z14 fetch over central Prague returns filled PNG tiles that decode to
+  `coverage_pixel_count > 0`; the transparent `default` placeholder decodes to
+  `is_empty`. Decoded coverage lands on roads/land in the Czech Republic (not
+  ocean, not outside CZ).
 - z14 COG is valid: CRS EPSG:3857, `uint8`, covered pixels > 0, internal
   overviews present.
-- The `streetlevel` source kind throttles probe calls (≈1 req/s) with
-  retry/backoff and a descriptive process identity; no use of bare
-  `urllib`/`requests` for the FRPC calls (all via `streetlevel.mapy`).
-- ToS caveats documented in the `mapy.py` module docstring (undocumented FRPC
-  API; only coverage presence/dates stored, not imagery; `Referer` header
-  requirement).
+- Fetches go through `polite.polite_fetch` with a descriptive User-Agent and a
+  conservative throttle; no bare `urllib`/`requests` in the provider path.
+- ToS caveats documented in the `mapy.py` module docstring (undocumented
+  `panorama_ln_hybrid-m` tile endpoint; only a binary coverage raster is
+  published, never imagery; Czech-only extent).
 
 ## 6. Status log
 
-- `2026-05-20` scout: drafted. Confirmed against installed `streetlevel`
-  `0.12.7`. `streetlevel.mapy.find_panorama` works live (Prague pano
-  `104046742`, provider `cyclomedia`, date 2023-08-11); `None` returned for an
-  ocean point; `historical=True` returned 4 prior-year panos at the Prague
-  spot; coverage confirmed Czech-only (Prague/Brno/Ostrava yes; Bratislava/
-  Vienna/High Tatras no). No tile/MVT/JSON coverage layer exists — provider
-  requires the new `streetlevel` source kind, which discovers coverage by
-  probing a grid of points rather than fetching tiles. No auth/`.env` key
-  needed. `en.mapy.cz/robots.txt` served an empty body (no Disallow rules).
-- `2026-05-20` approval: pending — awaiting user review.
-- `YYYY-MM-DD` implement / verify: notes appended here.
+- `2026-05-20` scout: drafted (original streetlevel/FRPC design — superseded).
+- `2026-05-20` approval: pending.
+- `2026-05-21` scout (REDESIGN): rewrote as a `kind="raster"` overlay-tile
+  provider. **Confirmed live that Mapy's Panorama coverage overlay is a real
+  raster `{z}/{x}/{y}` PNG tile layer**, not vector MVT and not purely
+  client-side. Findings:
+  - The viewer bundle `mapy.com/js/userweb.2.81.6.js` builds the overlay via
+    `createPanoLayer({lineUrl:"${mapserver}/panorama_ln_hybrid-m/",
+    pointsUrl:"${mapserver}/panorama_pt_hybrid-m/", pointsZoom:19})`; the layer
+    class extends `SMap.Layer.Canvas` / `SMap.LAYER_TILE` and loads tiles as
+    `new Image()` → raster PNG.
+  - Endpoint (lines layer):
+    `https://mapserver.mapy.cz/panorama_ln_hybrid-m/{z}-{x}-{y}` — path token is
+    hyphen-joined (`SMap.Layer.Tile.DEFAULT_OPTIONS.query = "{zoom}-{x}-{y}"`),
+    256-px PNG, standard web-mercator XYZ.
+  - Probed live: Prague `14-8848-5550` → `200 image/png` 25 KB filled; Brno
+    `14-8947-5613` → filled; line layer renders z7–~z20; Vienna `14-8937-5681`
+    and Atlantic `14-6371-6759` → `302 → ./default` (442-byte fully-transparent
+    PNG, 0 opaque pixels). No `sdk`/`apikey` needed (200 without them).
+  - Coverage lines are semi-transparent red (`rgba(253,0,0,128)` core).
+    Presence rule = any pixel with alpha > 0 — identical to the existing Yandex
+    STV transparent-PNG empty-tile rule in `source_kinds/raster.py`.
+  - `mapy.com` / `en.mapy.cz` `robots.txt` = HTTP 200 empty body (no Disallow).
+    Coverage confirmed Czech-only. No auth / no `.env` key.
+  - Old streetlevel fixtures (`getbest_*.json`) are obsolete and should be
+    deleted; the existing `data/processed/stac/mapy` item must be regenerated.
+- `2026-05-21` approval: approved by the user (raster redesign).
+- `2026-05-22` foundation: the generic `empty_tile_rule` option landed on `dev`
+  (B0 PRs #22/#23) and the rasterizer is coordinate-scheme aware (#25). The
+  provider PR can proceed.
+- `2026-05-22` implement: rebuilt `providers/mapy.py` as a `kind="raster"`
+  provider on branch `provider/mapy`. Re-verified the endpoint live: covered
+  tiles (Prague 14-8848-5550, Brno 14-8947-5613) → `200 image/png`; the
+  `default` placeholder → 442-byte fully-transparent PNG. **Correction:** the
+  `Referer: https://mapy.com/` header is *required* — without it empty tiles
+  return HTTP 403 instead of `302 → ./default` (see §2). Fixtures recorded:
+  `tile_{prague,brno}_z14.png`, `tile_empty_default.png`.
+- `YYYY-MM-DD` verify: notes appended here.
 
 ---
 
 ### Open questions for the reviewer
 
-1. **Probe-grid spacing/radius.** Proposed defaults: full-extent pass-1 spacing
-   ≈ 1–2 km, pass-2 spacing ≈ 150–250 m, `radius` ≈ half the spacing. Finer =
-   more complete but slower at ≈1 req/s (a 200 m grid over all of Czechia is on
-   the order of ~2M probes ≈ many hours). The reviewer should confirm the
-   accuracy/runtime trade-off, or approve a coarser final grid (e.g. 300–400 m)
-   if a slightly thinner z14 raster is acceptable.
-2. **`streetlevel` source kind is a hard prerequisite.** This provider cannot
-   ship until the foundation `streetlevel` kind (probe-grid driver +
-   self-throttling, since `streetlevel` bypasses `polite_fetch`) is merged.
-   Confirm that foundation PR is scheduled before the `mapy` provider PR.
-3. **Date layer.** Mapy exposes per-pano capture dates and a historical
-   timeline. Recommend deferring the optional `mapy_year.tif` date layer to a
-   follow-up (it needs `historical=True`, doubling+ the request count).
-   Confirm the base coverage scrape ships first with `historical=False`.
-4. **Densification via `getneighbours`.** As an alternative/supplement to a
-   fine probe grid, discovered panos could be walked via `get_links` /
-   `getneighbours` to follow the capture path. This is more efficient but more
-   complex; flagged as a possible optimisation, not part of this subplan.
+1. **Shared-file edit for the empty-tile rule.** `source_kinds/raster.py` gates
+   transparent-PNG empty detection behind a Yandex-specific flag. mapy needs the
+   same behaviour. Recommended: a small foundation PR generalizing it to
+   `options["empty_tile_rule"] == "transparent_png"` (back-compat alias for
+   `yandex_stv_renderer`), merged before the `mapy` provider PR. Confirm this
+   approach, or approve reusing `config_kind` directly.
+2. **Discovery zoom.** Proposed two-pass discovery at z8 (the line layer renders
+   at z7+). Confirm z8, or prefer z9 for a finer pass-1 footprint.
+3. **Date layer out of scope.** The raster overlay encodes presence only, no
+   capture dates. A `mapy_year.tif` date layer would require the separate FRPC
+   `getbest` metadata path and is deferred. Confirm the raster coverage scrape
+   ships without a date layer.
+4. **Tile retention.** Filled overlay tiles are Mapy-rendered map content. The
+   project keeps raw tiles only in gitignored `data/raw/` and publishes a
+   derived binary COG. Confirm this satisfies the ToS posture, or require
+   deleting `data/raw/mapy/` after rasterization.
