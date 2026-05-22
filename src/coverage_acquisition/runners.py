@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from coverage_acquisition import polite
 from coverage_acquisition.geo import iter_tile_coords, select_subboxes, split_bbox_into_grid, tile_range_for_bbox
@@ -20,15 +18,8 @@ from coverage_acquisition.io_utils import (
 from coverage_acquisition.models import FetchAreaRequest, ProviderDefinition, SourceDefinition
 from coverage_acquisition.polite import PolitePolicy
 from coverage_acquisition.providers import get_provider
+from coverage_acquisition.runtime_config import build_runtime_options
 from coverage_acquisition.source_kinds import DecodeContext, get_source_kind_handler
-
-# Backwards-compatible re-exports: these decoders moved into source_kinds/.
-from coverage_acquisition.source_kinds.raster import summarize_png  # noqa: F401
-from coverage_acquisition.source_kinds.vector_mvt import (  # noqa: F401
-    extract_vector_records,
-    guess_geometry_type_from_wkt,
-    inspect_vector_layers,
-)
 
 TILE_SUMMARY_FIELDS = [
     "provider",
@@ -225,7 +216,7 @@ def _job_run_label(provider: ProviderDefinition, request: FetchAreaRequest, subb
 def _fetch_job(provider: ProviderDefinition, source: SourceDefinition, job: dict, request: FetchAreaRequest) -> dict:
     output_dir = request.output_root / provider.output_namespace / job["run_label"]
     ensure_directory(output_dir)
-    runtime_options = _build_runtime_options(source, request)
+    runtime_options = build_runtime_options(source, request)
 
     fetched_tiles = []
     skipped_tiles = []
@@ -419,151 +410,6 @@ def _merge_headers(base: dict[str, str], extra: dict[str, str]) -> dict[str, str
     headers = dict(base)
     headers.update(extra)
     return headers
-
-
-def _build_runtime_options(source: SourceDefinition, request: FetchAreaRequest) -> dict:
-    config_kind = source.options.get("config_kind")
-    if config_kind == "naver_pstatic_tiles":
-        return _build_naver_pstatic_runtime_options(source, request)
-    if config_kind != "yandex_stv_renderer":
-        return {}
-
-    fallback_version = source.options.get("version_fallback", "")
-    runtime_options = {
-        "format_values": {
-            "layer": source.options.get("layer", "stv"),
-            "version": fallback_version,
-        },
-        "frontend_config": {
-            "config_source": "fallback",
-            "stv_version": fallback_version,
-            "query_layers": "",
-        },
-    }
-
-    try:
-        frontend_config = _discover_yandex_frontend_config(
-            page_url=source.options["frontend_page_url"],
-            headers=_merge_headers(source.headers, request.extra_headers),
-            timeout_seconds=request.timeout_seconds or 60,
-        )
-    except Exception as exc:
-        runtime_options["frontend_config"]["config_error"] = repr(exc)
-        return runtime_options
-
-    runtime_options["frontend_config"].update(frontend_config)
-    runtime_options["frontend_config"]["config_source"] = "live_page"
-    runtime_options["format_values"]["version"] = frontend_config["stv_version"]
-    if frontend_config.get("stv_tiles_template"):
-        runtime_options["tile_template"] = _normalize_yandex_stv_tile_template(
-            frontend_config["stv_tiles_template"],
-            request_layer=runtime_options["format_values"]["layer"],
-        )
-    return runtime_options
-
-
-def _build_naver_pstatic_runtime_options(source: SourceDefinition, request: FetchAreaRequest) -> dict:
-    fallback_version = source.options.get("version_fallback", "")
-    runtime_options = {
-        "format_values": {
-            "version": fallback_version,
-        },
-        "frontend_config": {
-            "config_source": "fallback",
-            "version": fallback_version,
-            "tilejson_url": source.options.get(
-                "tilejson_url",
-                "https://map.pstatic.net/nrb/styles/basic.json?fmt=png&mt=ps",
-            ),
-        },
-    }
-
-    try:
-        tilejson_config = _discover_naver_pstatic_tilejson_config(
-            tilejson_url=runtime_options["frontend_config"]["tilejson_url"],
-            headers=_merge_headers(source.headers, request.extra_headers),
-            timeout_seconds=request.timeout_seconds or 60,
-        )
-    except Exception as exc:
-        runtime_options["frontend_config"]["config_error"] = repr(exc)
-        return runtime_options
-
-    runtime_options["frontend_config"].update(tilejson_config)
-    runtime_options["frontend_config"]["config_source"] = "live_tilejson"
-    runtime_options["format_values"]["version"] = tilejson_config["version"]
-    return runtime_options
-
-
-def _is_yandex_stv_source(source: SourceDefinition) -> bool:
-    return source.options.get("config_kind") == "yandex_stv_renderer"
-
-
-def _discover_yandex_frontend_config(page_url: str, headers: dict[str, str], timeout_seconds: int) -> dict[str, str]:
-    request = Request(page_url, headers=headers)
-    with urlopen(request, timeout=timeout_seconds) as response:
-        html = response.read().decode("utf-8")
-
-    match = re.search(r'<script type="application/json" class="state-view">(.*?)</script>', html, re.S)
-    if not match:
-        raise RuntimeError("Could not locate Yandex state-view JSON in the frontend page.")
-
-    state = json.loads(match.group(1))
-    config = state["config"]
-    return {
-        "stv_tiles_template": config["hosts"]["stvTiles"],
-        "stv_version": config["layers"]["stv"]["version"],
-        "query_layers": state.get("query", {}).get("l", ""),
-    }
-
-
-def _normalize_yandex_stv_tile_template(template: str, request_layer: str) -> str:
-    normalized = template.replace("\\u0026", "&")
-    normalized = normalized.replace("l=stv&", f"l={request_layer}&")
-    normalized = normalized.replace(
-        "https://0%d.core-stv-renderer.maps.yandex.net/",
-        "https://core-stv-renderer.maps.yandex.net/",
-    )
-    normalized = normalized.replace("%c", "x={x}&y={y}&z={z}")
-    normalized = normalized.replace("%v", "{version}")
-    normalized = normalized.replace("%l", "lang=en_US&scale=1")
-    return normalized
-
-
-def _discover_naver_pstatic_tilejson_config(
-    tilejson_url: str,
-    headers: dict[str, str],
-    timeout_seconds: int,
-) -> dict[str, str]:
-    payload, _, _ = polite.polite_fetch(
-        tilejson_url,
-        headers=headers,
-        policy=PolitePolicy(timeout_seconds=timeout_seconds),
-    )
-    tilejson = json.loads(payload.decode("utf-8"))
-    return {"version": _extract_naver_pstatic_version(tilejson)}
-
-
-def _extract_naver_pstatic_version(payload: object) -> str:
-    if isinstance(payload, dict):
-        version = payload.get("version")
-        if isinstance(version, str) and version:
-            return version
-        for value in payload.values():
-            try:
-                return _extract_naver_pstatic_version(value)
-            except ValueError:
-                continue
-    if isinstance(payload, list):
-        for value in payload:
-            try:
-                return _extract_naver_pstatic_version(value)
-            except ValueError:
-                continue
-    if isinstance(payload, str):
-        match = re.search(r"/nrb/styles/basic/([^/]+)/", payload)
-        if match:
-            return match.group(1)
-    raise ValueError("Could not locate Naver pstatic tile version in TileJSON.")
 
 
 def _build_tile_url(

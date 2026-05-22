@@ -9,9 +9,10 @@ from urllib.parse import urlparse
 import numpy as np
 from PIL import Image
 
-from coverage_acquisition import geo, runners
+from coverage_acquisition import geo
 from coverage_acquisition.models import BoundingBox, FetchAreaRequest, TileRange
 from coverage_acquisition.providers import PROVIDERS, get_provider
+from coverage_acquisition.runtime_config import build_runtime_options
 from coverage_acquisition.source_kinds.raster import summarize_png
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "naver"
@@ -82,14 +83,14 @@ def test_naver_tilejson_parse(monkeypatch, tmp_path):
         assert policy.timeout_seconds == 60
         return payload, "image/json", 200
 
-    monkeypatch.setattr(runners.polite, "polite_fetch", fake_polite_fetch)
+    monkeypatch.setattr("coverage_acquisition.polite.polite_fetch", fake_polite_fetch)
 
     request = FetchAreaRequest(
         provider="naver",
         bbox=BoundingBox(127.020, 37.490, 127.060, 37.520),
         output_root=tmp_path,
     )
-    runtime_options = runners._build_runtime_options(source, request)
+    runtime_options = build_runtime_options(source, request)
     tilejson = fixture_json("basic_styles_ps.json")
 
     assert runtime_options["format_values"]["version"] == "1778829614"

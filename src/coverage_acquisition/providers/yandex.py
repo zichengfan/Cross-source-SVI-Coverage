@@ -2,7 +2,7 @@
 
 Tile selection and bounds use Yandex's WGS84 elliptic Mercator grid. The
 renderer version is discovered live from the Yandex Maps frontend at fetch time
-(see runners._build_runtime_options); the value below is only a fallback.
+(see runtime_config.yandex_stv_renderer); the value below is only a fallback.
 """
 
 from __future__ import annotations
