@@ -1,6 +1,13 @@
 """Coverage acquisition helpers for multi-source street-view experiments."""
 
 from coverage_acquisition.compare import maybe_dataframe, summarize_many_bundles
+from coverage_acquisition.kakao_frontend import (
+    KakaoRoadviewFrontendConfig,
+    build_kakao_roadview_hd_tile_url,
+    build_kakao_roadview_sd_tile_url,
+    build_kakao_roadview_tile_url,
+    discover_kakao_roadview_frontend_config,
+)
 from coverage_acquisition.models import BoundingBox, FetchAreaRequest
 from coverage_acquisition.notebook import bbox_from_preset, fetch_multi_source_coverage, fetch_single_source
 from coverage_acquisition.providers import DEFAULT_MULTI_SOURCE_PROVIDERS, PROVIDERS
@@ -11,9 +18,14 @@ __all__ = [
     "BoundingBox",
     "DEFAULT_MULTI_SOURCE_PROVIDERS",
     "FetchAreaRequest",
+    "KakaoRoadviewFrontendConfig",
     "PROVIDERS",
     "bbox_from_preset",
     "build_jobs",
+    "build_kakao_roadview_hd_tile_url",
+    "build_kakao_roadview_sd_tile_url",
+    "build_kakao_roadview_tile_url",
+    "discover_kakao_roadview_frontend_config",
     "fetch_multi_source_coverage",
     "fetch_provider_coverage",
     "fetch_single_source",
