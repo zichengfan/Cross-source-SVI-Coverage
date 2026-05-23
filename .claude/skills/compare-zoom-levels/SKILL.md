@@ -6,10 +6,10 @@ description: Render a provider's coverage overlay at several source zoom levels 
 # compare-zoom-levels
 
 Pick — or sanity-check — the **source zoom level** of a coverage-overlay
-provider by eye. Given one or more raster providers and a single fixed extent,
-this renders each provider's overlay at several zoom levels, every cell cropped
-to the *same* geographic box, and lays them out as one figure under `figures/`
-for a human to review.
+provider by eye. Given one or more raster or `vector_mvt` providers and a single
+fixed extent, this renders each provider's overlay at several zoom levels, every
+cell cropped to the *same* geographic box, and lays them out as one figure under
+`figures/` for a human to review.
 
 This is the **zoom-calibration** step of the per-provider pipeline: run it once
 a provider module exists (so it is registered), before committing to its
@@ -50,9 +50,13 @@ to use. Record the decision in the provider's `docs/providers/<key>.md`.
 
 ## Notes
 
-- Works on **raster** coverage-overlay providers (the kakao / naver / mapy
-  kind). `vector_mvt` providers are not yet supported — the script reports and
-  skips them.
+- Works on **raster** coverage-overlay providers (kakao / naver / mapy …) and
+  on **`vector_mvt`** providers (mapilio / barikoi / streetview_vn) — vector
+  tiles are decoded and their coverage geometry (points / lines / polygons)
+  rasterized to the same binary mask; the point/line pen scales with zoom so a
+  fixed ground footprint stays consistent across the columns. Other source
+  kinds (`coverage_json`, `tencent_mobile_street`) are not `{z}/{x}/{y}` tile
+  layers — the script reports and skips them.
 - Providers in different countries can still be compared at the same extent
   *size* — run the script once per region with a representative `--center`.
 - Coverage is drawn as a binary mask (covered = the provider's colour, empty =
