@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+
+from pyproj import Transformer
 
 from coverage_acquisition.models import BoundingBox, TileRange
 
@@ -100,6 +103,8 @@ def tile_to_lonlat_bounds_for_scheme(
 ) -> tuple[float, float, float, float]:
     if coordinate_scheme == "yandex_wgs84_mercator":
         return yandex_tile_to_lonlat_bounds(x, y, zoom)
+    if coordinate_scheme == "kakao_epsg5181":
+        return kakao_tile_to_lonlat_bounds(x, y, zoom)
     return tile_to_lonlat_bounds(x, y, zoom)
 
 
@@ -188,6 +193,86 @@ def wgs84_to_gcj02(lon: float, lat: float) -> tuple[float, float]:
     return lon + dlon, lat + dlat
 
 
+TENCENT_PX_SCALE = 268435456
+TENCENT_A = 114.59155902616465
+TENCENT_COMPRESS_LEVELS = (7, 11, 11, 11, 11, 11, 11, 11, 11)
+
+
+@dataclass(frozen=True)
+class TencentBlTile:
+    bl: int
+    tile_x: int
+    tile_y: int
+    origin_px_x: int
+    origin_px_y: int
+
+
+def tencent_pixel_to_gcj02(px_x: float, px_y: float) -> tuple[float, float]:
+    lon = 360.0 * px_x / TENCENT_PX_SCALE - 180.0
+    lat = math.atan(math.exp(math.radians(180.0 - 360.0 * px_y / TENCENT_PX_SCALE))) * TENCENT_A - 90.0
+    return lon, lat
+
+
+def tencent_gcj02_to_pixel(lon: float, lat: float) -> tuple[float, float]:
+    px_x = (lon + 180.0) * TENCENT_PX_SCALE / 360.0
+    px_y = (TENCENT_PX_SCALE / 360.0) * (
+        180.0 - math.degrees(math.log(math.tan((lat + 90.0) / TENCENT_A)))
+    )
+    return px_x, px_y
+
+
+def gcj02_to_wgs84(lon: float, lat: float, iterations: int = 8) -> tuple[float, float]:
+    if baidu_out_of_china(lon, lat):
+        return lon, lat
+
+    wgs_lon = lon
+    wgs_lat = lat
+    for _ in range(iterations):
+        gcj_lon, gcj_lat = wgs84_to_gcj02(wgs_lon, wgs_lat)
+        wgs_lon -= gcj_lon - lon
+        wgs_lat -= gcj_lat - lat
+    return wgs_lon, wgs_lat
+
+
+def tencent_tile_size(level: int) -> int:
+    return TENCENT_PX_SCALE // (2**level)
+
+
+def tencent_point_multiplier(level: int) -> int:
+    index = level - 10
+    if index < 0 or index >= len(TENCENT_COMPRESS_LEVELS):
+        raise ValueError(f"Unsupported Tencent data level: {level}")
+    compress_level = TENCENT_COMPRESS_LEVELS[index]
+    return math.floor(tencent_tile_size(level) / (1 << compress_level))
+
+
+def tencent_bl_tiles_for_gcj02_bbox(bbox: BoundingBox, level: int) -> list[TencentBlTile]:
+    tile_size = tencent_tile_size(level)
+    west_px, north_px = tencent_gcj02_to_pixel(bbox.min_lon, bbox.max_lat)
+    east_px, south_px = tencent_gcj02_to_pixel(bbox.max_lon, bbox.min_lat)
+
+    west = math.floor(west_px / tile_size)
+    north = math.floor(north_px / tile_size)
+    east = math.floor((east_px - 1) / tile_size)
+    south = math.floor((south_px - 1) / tile_size)
+
+    tiles = []
+    bl = 0
+    for tile_x in range(west, east + 1):
+        for tile_y in range(north, south + 1):
+            tiles.append(
+                TencentBlTile(
+                    bl=bl,
+                    tile_x=tile_x,
+                    tile_y=tile_y,
+                    origin_px_x=tile_x * tile_size,
+                    origin_px_y=tile_y * tile_size,
+                )
+            )
+            bl += 1
+    return tiles
+
+
 def gcj02_to_bd09(lon: float, lat: float) -> tuple[float, float]:
     z = math.sqrt(lon * lon + lat * lat) + 0.00002 * math.sin(lat * math.pi * 3000.0 / 180.0)
     theta = math.atan2(lat, lon) + 0.000003 * math.cos(lon * math.pi * 3000.0 / 180.0)
@@ -259,9 +344,63 @@ def baidu_bbox_to_tile_range(bbox: BoundingBox, zoom: int) -> TileRange:
     return TileRange(x_min=min(xs), x_max=max(xs), y_min=min(ys), y_max=max(ys))
 
 
+KAKAO_EPSG5181_ORIGIN_X = -30000.0
+KAKAO_EPSG5181_ORIGIN_Y = -60000.0
+KAKAO_EPSG5181_TILE_SIZE = 256
+KAKAO_EPSG5181_RESOLUTIONS = (2048.0, 1024.0, 512.0, 256.0, 128.0, 64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0, 0.5, 0.25)
+WGS84_TO_KAKAO_EPSG5181 = Transformer.from_crs("EPSG:4326", "EPSG:5181", always_xy=True)
+KAKAO_EPSG5181_TO_WGS84 = Transformer.from_crs("EPSG:5181", "EPSG:4326", always_xy=True)
+
+
+def kakao_epsg5181_resolution(zoom: int) -> float:
+    try:
+        return KAKAO_EPSG5181_RESOLUTIONS[zoom]
+    except IndexError as exc:
+        raise ValueError(f"Unsupported kakao_epsg5181 zoom: {zoom}") from exc
+
+
+def wgs84_to_kakao_epsg5181_tile(lon: float, lat: float, zoom: int) -> tuple[int, int]:
+    x_m, y_m = WGS84_TO_KAKAO_EPSG5181.transform(lon, lat)
+    tile_span = KAKAO_EPSG5181_TILE_SIZE * kakao_epsg5181_resolution(zoom)
+    tile_x = int(math.floor((x_m - KAKAO_EPSG5181_ORIGIN_X) / tile_span))
+    tile_y = int(math.floor((y_m - KAKAO_EPSG5181_ORIGIN_Y) / tile_span))
+    return tile_x, tile_y
+
+
+def kakao_epsg5181_bbox_to_tile_range(bbox: BoundingBox, zoom: int) -> TileRange:
+    corner_tiles = [
+        wgs84_to_kakao_epsg5181_tile(bbox.min_lon, bbox.min_lat, zoom),
+        wgs84_to_kakao_epsg5181_tile(bbox.min_lon, bbox.max_lat, zoom),
+        wgs84_to_kakao_epsg5181_tile(bbox.max_lon, bbox.min_lat, zoom),
+        wgs84_to_kakao_epsg5181_tile(bbox.max_lon, bbox.max_lat, zoom),
+    ]
+    xs = [tile[0] for tile in corner_tiles]
+    ys = [tile[1] for tile in corner_tiles]
+    return TileRange(x_min=min(xs), x_max=max(xs), y_min=min(ys), y_max=max(ys))
+
+
+def kakao_tile_to_lonlat_bounds(x: int, y: int, zoom: int) -> tuple[float, float, float, float]:
+    tile_span = KAKAO_EPSG5181_TILE_SIZE * kakao_epsg5181_resolution(zoom)
+    x_min_m = KAKAO_EPSG5181_ORIGIN_X + x * tile_span
+    x_max_m = KAKAO_EPSG5181_ORIGIN_X + (x + 1) * tile_span
+    y_min_m = KAKAO_EPSG5181_ORIGIN_Y + y * tile_span
+    y_max_m = KAKAO_EPSG5181_ORIGIN_Y + (y + 1) * tile_span
+    lonlat_corners = [
+        KAKAO_EPSG5181_TO_WGS84.transform(x_min_m, y_min_m),
+        KAKAO_EPSG5181_TO_WGS84.transform(x_min_m, y_max_m),
+        KAKAO_EPSG5181_TO_WGS84.transform(x_max_m, y_min_m),
+        KAKAO_EPSG5181_TO_WGS84.transform(x_max_m, y_max_m),
+    ]
+    lons = [corner[0] for corner in lonlat_corners]
+    lats = [corner[1] for corner in lonlat_corners]
+    return min(lons), min(lats), max(lons), max(lats)
+
+
 def tile_range_for_bbox(bbox: BoundingBox, zoom: int, coordinate_scheme: str) -> TileRange:
     if coordinate_scheme == "baidu":
         return baidu_bbox_to_tile_range(bbox, zoom)
     if coordinate_scheme == "yandex_wgs84_mercator":
         return yandex_bbox_to_tile_range(bbox, zoom)
+    if coordinate_scheme == "kakao_epsg5181":
+        return kakao_epsg5181_bbox_to_tile_range(bbox, zoom)
     return bbox_to_tile_range(bbox, zoom)

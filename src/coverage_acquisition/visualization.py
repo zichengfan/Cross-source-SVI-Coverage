@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -14,7 +13,6 @@ from PIL import Image
 from coverage_acquisition.geo import tile_to_lonlat_bounds_for_scheme
 from coverage_acquisition.io_utils import load_json, read_csv_rows
 from coverage_acquisition.models import BoundingBox
-
 
 PROVIDER_COLORS = {
     "apple_lookaround": "#1f78b4",

@@ -1,14 +1,7 @@
 from __future__ import annotations
 
-import ast
-import importlib.metadata
 import json
-import re
 from functools import lru_cache
-from pathlib import Path
-
-from google.protobuf import descriptor_pool, message_factory
-
 
 MVT_CMD_MOVE_TO = 1
 MVT_CMD_LINE_TO = 2
@@ -21,35 +14,19 @@ MVT_POLYGON = 3
 
 @lru_cache(maxsize=1)
 def load_vector_tile_message_class():
+    """Return the protobuf `tile` message class from mapbox_vector_tile.
+
+    mapbox_vector_tile >= 2 ships a ready protobuf module, so the class is
+    imported directly rather than rebuilt from serialized descriptor bytes.
+    """
     try:
-        distribution = importlib.metadata.distribution("mapbox_vector_tile")
-    except importlib.metadata.PackageNotFoundError as exc:
-        raise RuntimeError("mapbox_vector_tile package is required for locating vector_tile protobuf schema files.") from exc
+        from mapbox_vector_tile.Mapbox import vector_tile_pb2
+    except ImportError as exc:  # pragma: no cover - dependency missing
+        raise RuntimeError(
+            "mapbox_vector_tile is required to decode vector tiles."
+        ) from exc
 
-    source_path = None
-    for file in distribution.files or []:
-        candidate = Path(str(file))
-        if candidate.as_posix().endswith("Mapbox/vector_tile_p3_pb2.py"):
-            source_path = distribution.locate_file(file)
-            break
-
-    if source_path is None:
-        raise RuntimeError("Could not locate Mapbox/vector_tile_p3_pb2.py in mapbox_vector_tile distribution.")
-
-    with open(source_path, "r", encoding="utf-8") as handle:
-        source = handle.read()
-
-    match = re.search(r"serialized_pb=(b'.*?')\n\)", source, re.S)
-    if not match:
-        raise RuntimeError(f"Could not locate serialized_pb descriptor bytes in {source_path}.")
-
-    serialized_pb = ast.literal_eval(match.group(1))
-    pool = descriptor_pool.DescriptorPool()
-    pool.AddSerializedFile(serialized_pb)
-    tile_descriptor = pool.FindMessageTypeByName("mapnik.vector.tile")
-    if hasattr(message_factory, "GetMessageClass"):
-        return message_factory.GetMessageClass(tile_descriptor)
-    return message_factory.MessageFactory(pool).GetPrototype(tile_descriptor)
+    return vector_tile_pb2.tile
 
 
 def parse_value(val) -> object:

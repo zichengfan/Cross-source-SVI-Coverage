@@ -125,6 +125,7 @@ class ProviderDefinition:
     default_display_zoom: int
     request_timeout_seconds: int = 60
     coordinate_scheme: str = "web_mercator"
+    discovery_kind: str = field(default="default")
     supports_auto_zoom: bool = False
     area_presets: dict[str, BoundingBox] = field(default_factory=dict)
     sources: tuple[SourceDefinition, ...] = field(default_factory=tuple)
