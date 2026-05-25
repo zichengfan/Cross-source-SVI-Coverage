@@ -29,10 +29,12 @@ independently shippable.
    changes are their own slice that others depend on.
 4. **Set blocking relationships** — note "blocked by #N" where a foundation
    slice must merge first. Order them so every intermediate `dev` is green.
-5. **Create the GitHub issues** on `koito19960406/Cross-source-SVI-Coverage`
-   with the repo's labels (`provider`, `tier-1|2|3`, `foundation`, ...) and the
-   right milestone; record the blocking edges in the issue bodies. Every issue's
-   eventual PR targets `dev`.
+5. **Create the GitHub issues** with `gh issue create` (no `--repo`; this
+   uses the default remote, which is now upstream
+   `zichengfan/Cross-source-SVI-Coverage`). Apply the repo's labels
+   (`provider`, `tier-1|2|3`, `foundation`, ...) and the right milestone;
+   record the blocking edges in the issue bodies. Every issue's eventual PR
+   targets `dev`.
 
 ## Output
 A table of the created issues (number, title, blocked-by) and the recommended
