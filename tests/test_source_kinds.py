@@ -136,3 +136,118 @@ def test_guess_geometry_type_from_wkt():
     assert guess_geometry_type_from_wkt("POINT (1 2)") == "Point"
     assert guess_geometry_type_from_wkt("LINESTRING (0 0, 1 1)") == "LineString"
     assert guess_geometry_type_from_wkt("") == "Unknown"
+
+
+def test_vector_geojson_registered():
+    assert "vector_geojson" in SOURCE_KIND_HANDLERS
+
+
+def _feature_collection(features: list[dict]) -> bytes:
+    return json.dumps({"type": "FeatureCollection", "features": features}).encode("utf-8")
+
+
+def test_decode_vector_geojson_standard_features(make_source, make_decode_context):
+    payload = _feature_collection(
+        [
+            {
+                "type": "Feature",
+                "id": "p1",
+                "geometry": {"type": "Point", "coordinates": [4.9, 52.3]},
+                "properties": {"name": "alpha"},
+            },
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [1.0, 1.0]]},
+                "properties": {"name": "beta"},
+            },
+        ]
+    )
+    source = make_source("vector_geojson", template="https://example.test/{z}/{x}/{y}.geojson")
+    ctx = make_decode_context(source, payload=payload, content_type="application/geo+json")
+
+    result = get_source_kind_handler("vector_geojson")(ctx)
+
+    assert result.feature_count == 2
+    assert len(result.vector_feature_records) == 2
+    assert result.is_empty is False
+    assert result.tile_path is not None and result.tile_path.exists()
+    assert result.tile_path.suffix == ".geojson"
+
+    point_record = next(r for r in result.vector_feature_records if r["geometry_type"] == "Point")
+    assert point_record["geometry_wkt"].startswith("POINT")
+    assert "4.9" in point_record["geometry_wkt"] and "52.3" in point_record["geometry_wkt"]
+    assert point_record["mvt_id"] == "p1"
+    assert json.loads(point_record["properties_json"])["name"] == "alpha"
+
+
+def test_decode_vector_geojson_empty(make_source, make_decode_context):
+    source = make_source("vector_geojson")
+    ctx = make_decode_context(source, payload=_feature_collection([]), content_type="application/geo+json")
+
+    result = get_source_kind_handler("vector_geojson")(ctx)
+
+    assert result.feature_count == 0
+    assert result.vector_feature_records == []
+    assert result.is_empty is True
+
+
+def test_decode_vector_geojson_lonlat_from_properties(make_source, make_decode_context):
+    # ASIG case: the Point geometry is in tile-local pixel space (0-4096), but the
+    # true WGS84 location is carried in `lon`/`lat` properties. With the property
+    # names configured, the emitted WKT must use the properties, not the geometry.
+    payload = _feature_collection(
+        [
+            {
+                "type": "Feature",
+                "id": "cam-1",
+                "geometry": {"type": "Point", "coordinates": [2048, 2048]},
+                "properties": {"lon": 19.819, "lat": 41.327, "heading": 90},
+            }
+        ]
+    )
+    source = make_source(
+        "vector_geojson",
+        options={"geojson_lon_property": "lon", "geojson_lat_property": "lat"},
+    )
+    ctx = make_decode_context(source, payload=payload, content_type="application/geo+json")
+
+    result = get_source_kind_handler("vector_geojson")(ctx)
+
+    assert result.feature_count == 1
+    wkt = result.vector_feature_records[0]["geometry_wkt"]
+    assert "19.819" in wkt and "41.327" in wkt
+    assert "2048" not in wkt
+
+
+def test_decode_vector_geojson_geometry_type_filter(make_source, make_decode_context):
+    # ASIG's LineString/MultiLineString features are tile-pixel-space decoration and
+    # must not be emitted as geographic geometries. A geometry-type allow-list keeps
+    # only the Point photo-centers.
+    payload = _feature_collection(
+        [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [4.9, 52.3]},
+                "properties": {"lon": 4.9, "lat": 52.3},
+            },
+            {
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[0, 0], [4096, 4096]]},
+                "properties": {"tourName": "trace"},
+            },
+        ]
+    )
+    source = make_source(
+        "vector_geojson",
+        options={
+            "geojson_lon_property": "lon",
+            "geojson_lat_property": "lat",
+            "geojson_geometry_types": "Point",
+        },
+    )
+    ctx = make_decode_context(source, payload=payload, content_type="application/geo+json")
+
+    result = get_source_kind_handler("vector_geojson")(ctx)
+
+    assert result.feature_count == 1
+    assert {r["geometry_type"] for r in result.vector_feature_records} == {"Point"}
