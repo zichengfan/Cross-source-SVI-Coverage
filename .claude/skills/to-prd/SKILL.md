@@ -31,8 +31,10 @@ artifact the rest of the pipeline consumes.
    - **Affected modules** — from step 4.
    - **Open questions** — anything still unresolved.
 6. **Human approval gate.** Present the PRD; revise until the user approves.
-7. **Publish** as a GitHub issue on `koito19960406/Cross-source-SVI-Coverage`
-   (`gh issue create --body-file docs/prd/<slug>.md --label prd`).
+7. **Publish** as a GitHub issue
+   (`gh issue create --body-file docs/prd/<slug>.md --label prd` — no
+   `--repo`; uses the default remote, which is now upstream
+   `zichengfan/Cross-source-SVI-Coverage`).
 
 ## Output
 The committed `docs/prd/<slug>.md`, the issue URL, and a one-line summary. Next

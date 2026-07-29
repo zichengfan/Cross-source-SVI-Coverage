@@ -112,9 +112,10 @@ Subagents and Codex work on **one provider each, in isolation**:
 - **Review before merge.** Run `/review` (and tests) on each PR before merging
   into `dev`.
 
-GitHub: `origin` is the working fork `koito19960406/Cross-source-SVI-Coverage`
-— push branches and open PRs (into `dev`) there. `upstream` is
-`zichengfan/Cross-source-SVI-Coverage`.
+GitHub: `origin` is `zichengfan/Cross-source-SVI-Coverage` (the canonical
+repo) — push branches and open PRs (into `dev`) there. `fork` is the
+historical working fork `koito19960406/Cross-source-SVI-Coverage`, kept as a
+secondary remote for archival reference; new work does not go there.
 
 ## Conventions
 
