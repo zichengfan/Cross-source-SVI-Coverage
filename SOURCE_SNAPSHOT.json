@@ -13,7 +13,7 @@
   "boundary": {
     "copy_mode": "explicit allowlist; no symlinks",
     "source_project_modified": false,
-    "included": "coverage acquisition, decoding, manifests, tests, examples, operational documentation and an offline operational smoke notebook",
+    "included": "coverage acquisition, decoding, manifests, tests, examples, operational documentation and an offline same-area and multiscale provider notebook",
     "excluded": "data, outputs, source-project research notebooks, scientific analysis, figures, agent records, credentials and captures"
   },
   "copied_files": [

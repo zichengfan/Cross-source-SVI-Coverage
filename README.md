@@ -5,7 +5,8 @@ street-view coverage project. It discovers, downloads, decodes and validates
 **coverage metadata and coverage overlays**. It does not download panorama
 imagery and does not contain the parent project's demographic analysis,
 figures, research notebooks or local datasets. The one notebook retained here
-is an operational, offline-by-default smoke test for the acquisition APIs.
+is an operational, offline-by-default same-area and multiscale check for the
+acquisition APIs.
 
 ## Supported acquisition paths
 
@@ -59,7 +60,8 @@ requirements and rate limits remain the operator's responsibility.
 ## Repository boundary
 
 - `src/coverage_acquisition/`: provider registry, grids, decoders, runners,
-  bounded acquisition and manifests.
+  bounded acquisition, case contracts, acquisition-QA visualization and
+  manifests.
 - `integrations/mappls_realview/`: authorized Mappls Web SDK workflow.
 - `tests/`: offline acquisition and decoding tests.
 - `examples/`: small operator-facing entry points.
