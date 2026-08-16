@@ -40,6 +40,7 @@ cells = [
         """
         import math
         import os
+        import shutil
         import sys
         from pathlib import Path
 
@@ -47,6 +48,7 @@ cells = [
         import matplotlib.pyplot as plt
         import numpy as np
         import pandas as pd
+        from IPython.display import Image as NotebookImage
         from IPython.display import display
         from matplotlib.colors import BoundaryNorm, ListedColormap
         from matplotlib.patches import Patch, Rectangle
@@ -94,6 +96,7 @@ cells = [
             load_result_from_manifest,
             plot_mappls_segments,
             plot_result,
+            result_tile_bbox,
             style_geo_axis,
         )
         mpl.rcParams.update(
@@ -122,7 +125,9 @@ cells = [
     code(
         "controls",
         """
-        ALLOW_NETWORK = False
+        ALLOW_NETWORK = os.getenv("SVI_NOTEBOOK_ALLOW_NETWORK") == "1"
+        SHOW_REFERENCE_MAPS = os.getenv("SVI_SHOW_REFERENCE_MAPS") == "1"
+        CAPTURE_BARIKOI_MAPS = os.getenv("SVI_CAPTURE_BARIKOI_MAPS") == "1"
         RUN_ACQUISITIONS: set[tuple[str, str]] = set()
         RUN_MULTISCALE_PROBES: set[tuple[str, int]] = set()
         AUTHORIZED_ACCESS_GATED: set[str] = set()
@@ -131,6 +136,7 @@ cells = [
 
         OUTPUT_ROOT = PROJECT_ROOT / "local" / "provider_comparison_cases"
         FIGURE_ROOT = OUTPUT_ROOT / "figures"
+        REFERENCE_FIGURE_ROOT = OUTPUT_ROOT / "reference_figures"
         MAPILLARY_ACCESS_TOKEN = os.getenv("MAPILLARY_ACCESS_TOKEN")
         TENCENT_PMTILES_URL = os.getenv("TENCENT_PMTILES_URL", DEFAULT_TENCENT_PMTILES_URL)
         """,
@@ -391,6 +397,25 @@ cells = [
         """,
     ),
     markdown(
+        "area-reference-title",
+        """
+        ### Validated same-area map outputs
+
+        The rendered outputs below retain the actual provider coverage maps from the validated comparison run. They are embedded in this notebook for collaborators; raw tiles are intentionally excluded from the repository.
+        """,
+    ),
+    code(
+        "area-reference-maps",
+        """
+        area_reference_paths = sorted(REFERENCE_FIGURE_ROOT.glob("area_*.png"))
+        if SHOW_REFERENCE_MAPS and area_reference_paths:
+            for path in area_reference_paths:
+                display(NotebookImage(filename=str(path)))
+        else:
+            print(f"Embedded validated area-map plates: {len(area_reference_paths)} staged for this execution.")
+        """,
+    ),
+    markdown(
         "multiscale-title",
         """
         ## 2. Same-provider, multiscale comparison
@@ -418,8 +443,8 @@ cells = [
     code(
         "multiscale-matrix",
         """
-        status_order = ["unsupported", "safety_skip", "access_gated", "requires_token", "native_archive", "planned"]
-        status_colors = ["#E5E7EB", "#D8A45D", "#B79AC8", "#E7C97B", "#79AFC3", "#6FAF8E"]
+        status_order = ["unsupported", "access_gated", "requires_token", "native_archive", "planned"]
+        status_colors = ["#E5E7EB", "#B79AC8", "#E7C97B", "#79AFC3", "#6FAF8E"]
         status_index = {status: index for index, status in enumerate(status_order)}
         provider_order = [case.provider for case in MULTISCALE_CASES]
         matrix = np.zeros((len(provider_order), len(MULTISCALE_LEVELS)), dtype=int)
@@ -451,19 +476,16 @@ cells = [
     markdown(
         "barikoi-note",
         """
-        ### Barikoi correction
+        ### Barikoi correction and ephemeral rendering
 
-        The earlier multiscale failure came from notebook-local registration: the comparison cell registered Barikoi, but the later audit could run without that state and returned `Provider registration missing`. Barikoi is now a permanent shared registry provider. Levels z7–z13 are additionally blocked before network access because low-level ThirdEye360 MVT responses can exceed 100 MiB; z14–z17 remain available for controlled probes. An end-to-end check on 2026-08-16 returned one tile with 3,156 features at z14 and one tile with 572 features at z16, with zero tile errors.
+        The earlier multiscale failure came from notebook-local registration: the comparison cell registered Barikoi, but the later audit could run without that state and returned `Provider registration missing`. Barikoi is now a permanent shared registry provider, and every provider-declared level from z7 through z17 is permitted. Because low-level ThirdEye360 tiles may be large, the reference build processes one tile at a time and deletes its raw run directory immediately after drawing the panel.
         """,
     ),
     code(
         "multiscale-acquisition",
         """
-        try:
-            validate_multiscale_probe("barikoi", 13)
-        except ValueError as exc:
-            print("Barikoi pre-network guard:", exc)
-        assert validate_multiscale_probe("barikoi", 14)["source_id"] == "barikoi_thirdeye360_mvt"
+        assert validate_multiscale_probe("barikoi", 7)["source_id"] == "barikoi_thirdeye360_mvt"
+        assert validate_multiscale_probe("barikoi", 17)["source_id"] == "barikoi_thirdeye360_mvt"
 
 
         async def acquire_multiscale_probe(provider_key: str, requested_level: int):
@@ -485,7 +507,7 @@ cells = [
                         output_root=OUTPUT_ROOT,
                         display_zoom=requested_level,
                         stop_on_error=False,
-                        timeout_seconds=30,
+                        timeout_seconds=180 if provider_key == "barikoi" else 30,
                         run_label=run_label,
                         access_token=MAPILLARY_ACCESS_TOKEN if provider_key == "mapillary" else None,
                     )
@@ -519,6 +541,25 @@ cells = [
         print(f"Live multiscale probes executed: {len(live_multiscale_results)}")
         """,
     ),
+    markdown(
+        "multiscale-reference-title",
+        """
+        ### Validated multiscale map outputs
+
+        These plates show the actual returned coverage artifact at each requested level. Status-only panels identify unsupported, empty, gated or failed requests rather than treating them as evidence of absent coverage.
+        """,
+    ),
+    code(
+        "multiscale-reference-maps",
+        """
+        multiscale_reference_paths = sorted(REFERENCE_FIGURE_ROOT.glob("multiscale_*.png"))
+        if SHOW_REFERENCE_MAPS and multiscale_reference_paths:
+            for path in multiscale_reference_paths:
+                display(NotebookImage(filename=str(path)))
+        else:
+            print(f"Embedded validated multiscale plates: {len(multiscale_reference_paths)} staged for this execution.")
+        """,
+    ),
     code(
         "multiscale-render",
         """
@@ -546,10 +587,11 @@ cells = [
                 if provider_key in PROVIDERS:
                     path = multiscale_registry_manifest(provider_key, requested_level)
                     if path.exists():
+                        result = load_result_from_manifest(path)
                         plot_result(
                             ax,
-                            load_result_from_manifest(path),
-                            bbox=bbox,
+                            result,
+                            bbox=result_tile_bbox(result),
                             label=PROVIDER_LABELS[provider_key],
                             level_label=level_label,
                         )
@@ -578,7 +620,7 @@ cells = [
             for ax in axes.flat[len(MULTISCALE_LEVELS) :]:
                 ax.axis("off")
             fig.suptitle(
-                f"{PROVIDER_LABELS[provider_key]} in {case.area}: fixed-ROI multiscale comparison",
+                f"{PROVIDER_LABELS[provider_key]} in {case.area}: single-tile multiscale comparison",
                 fontsize=10,
                 fontweight="bold",
             )
@@ -586,8 +628,77 @@ cells = [
             return fig
 
 
-        render_multiscale_provider(FOCAL_MULTISCALE_PROVIDER)
-        plt.show()
+        async def capture_barikoi_multiscale_and_cleanup():
+            provider_key = "barikoi"
+            rows = zoom_plan_df.loc[zoom_plan_df["provider"].eq(provider_key)].set_index("requested_level")
+            fig, axes = plt.subplots(4, 4, figsize=(9.2, 8.2), squeeze=False)
+            audit_rows = []
+            for ax, requested_level in zip(axes.flat, MULTISCALE_LEVELS):
+                row = rows.loc[requested_level]
+                if row["plan_status"] == "unsupported":
+                    ax.set_facecolor(status_colors[status_index["unsupported"]])
+                    ax.text(0.5, 0.5, "unsupported", transform=ax.transAxes, ha="center", va="center")
+                    ax.set_title(f"requested z{requested_level}\\nunsupported", fontsize=8, pad=4)
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    for spine in ax.spines.values():
+                        spine.set_visible(False)
+                    audit_rows.append({"requested_level": requested_level, "status": "unsupported"})
+                    continue
+
+                result = None
+                try:
+                    manifest_path = multiscale_registry_manifest(provider_key, requested_level)
+                    if manifest_path.exists():
+                        result = load_result_from_manifest(manifest_path)
+                    else:
+                        batch_result = await acquire_multiscale_probe(provider_key, requested_level)
+                        result = batch_result["results"][0]
+                    summary = plot_result(
+                        ax,
+                        result,
+                        bbox=result_tile_bbox(result),
+                        label="",
+                        level_label=f"requested z{requested_level}",
+                        max_plot_records=50_000,
+                        show_axis_labels=False,
+                    )
+                    audit_rows.append({"requested_level": requested_level, "status": "rendered", **summary})
+                except Exception as exc:
+                    ax.set_facecolor("#FBEAEA")
+                    ax.text(0.5, 0.5, type(exc).__name__, transform=ax.transAxes, ha="center", va="center")
+                    ax.set_title(f"requested z{requested_level}\\nfetch error", fontsize=8, pad=4)
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    for spine in ax.spines.values():
+                        spine.set_visible(False)
+                    audit_rows.append(
+                        {"requested_level": requested_level, "status": "error", "error_type": type(exc).__name__}
+                    )
+                finally:
+                    if result is not None:
+                        shutil.rmtree(Path(result["output_dir"]), ignore_errors=False)
+
+            for ax in axes.flat[len(MULTISCALE_LEVELS) :]:
+                ax.axis("off")
+            fig.suptitle(
+                "Barikoi ThirdEye360 in Dhaka: one-tile multiscale coverage",
+                fontsize=10,
+                fontweight="bold",
+            )
+            fig.tight_layout(rect=(0, 0, 1, 0.95))
+            return fig, pd.DataFrame(audit_rows)
+
+
+        if CAPTURE_BARIKOI_MAPS:
+            if not ALLOW_NETWORK:
+                raise RuntimeError("SVI_CAPTURE_BARIKOI_MAPS=1 also requires SVI_NOTEBOOK_ALLOW_NETWORK=1.")
+            barikoi_figure, barikoi_capture_df = await capture_barikoi_multiscale_and_cleanup()
+            display(barikoi_capture_df)
+            plt.show()
+        else:
+            render_multiscale_provider(FOCAL_MULTISCALE_PROVIDER)
+            plt.show()
         """,
     ),
     code(
@@ -602,7 +713,9 @@ cells = [
         assert not RUN_ACQUISITIONS and not RUN_MULTISCALE_PROBES
         print(
             f"Validated {len(compared)} providers, {len(AREA_COMPARISON_CASES)} same-area cases, "
-            f"and {len(zoom_plan_df)} multiscale plan rows. Provider network calls: 0."
+            f"and {len(zoom_plan_df)} multiscale plan rows. "
+            f"Reference maps displayed: {len(area_reference_paths) + len(multiscale_reference_paths)}; "
+            f"Barikoi live capture: {CAPTURE_BARIKOI_MAPS}."
         )
         """,
     ),

@@ -4,9 +4,10 @@ This repository contains the shareable acquisition layer of the global
 street-view coverage project. It discovers, downloads, decodes and validates
 **coverage metadata and coverage overlays**. It does not download panorama
 imagery and does not contain the parent project's demographic analysis,
-figures, research notebooks or local datasets. The one notebook retained here
-is an operational, offline-by-default same-area and multiscale check for the
-acquisition APIs.
+research analysis or local datasets. The one notebook retained here is an
+operational, offline-by-default same-area and multiscale check for the
+acquisition APIs. Its validated coverage-map outputs are embedded for immediate
+review; the underlying tiles and feature tables are not committed.
 
 ## Supported acquisition paths
 
@@ -65,8 +66,8 @@ requirements and rate limits remain the operator's responsibility.
 - `integrations/mappls_realview/`: authorized Mappls Web SDK workflow.
 - `tests/`: offline acquisition and decoding tests.
 - `examples/`: small operator-facing entry points.
-- `notebooks/`: offline-by-default provider call cases and acquisition-oriented
-  visual checks; not scientific analysis.
+- `notebooks/`: offline-by-default provider call cases with embedded same-area
+  and multiscale coverage maps; not scientific analysis.
 - `docs/`: operational status and acquisition contracts.
 
 Raw responses, credentials, data archives, derived coverage layers and analysis

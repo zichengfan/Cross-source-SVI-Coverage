@@ -239,12 +239,6 @@ def _multiscale_plan_row(case: MultiscaleCase, requested_level: int) -> dict:
         "planned_tiles": tile_count,
     }
 
-    if case.provider == "barikoi" and requested_level < 14:
-        return {
-            **row,
-            "plan_status": "safety_skip",
-            "note": "Low-level ThirdEye360 MVT responses can exceed 100 MiB; use z14-z17 for probes.",
-        }
     if case.provider == "mapillary":
         return {**row, "plan_status": "requires_token", "note": "Set MAPILLARY_ACCESS_TOKEN."}
     if case.provider == "apple_lookaround":
@@ -255,9 +249,9 @@ def _multiscale_plan_row(case: MultiscaleCase, requested_level: int) -> dict:
 def validate_multiscale_probe(provider_key: str, requested_level: int) -> dict:
     case = multiscale_case(provider_key)
     row = _multiscale_plan_row(case, requested_level)
-    if row["plan_status"] in {"unsupported", "safety_skip"}:
+    if row["plan_status"] == "unsupported":
         raise ValueError(
-            f"Unsafe or unsupported multiscale probe: {provider_key} level {requested_level} "
+            f"Unsupported multiscale probe: {provider_key} level {requested_level} "
             f"({row['plan_status']}): {row['note']}"
         )
     return row

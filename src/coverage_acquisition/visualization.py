@@ -64,13 +64,19 @@ def plot_result(
     label: str,
     level_label: str,
     color: str = DEFAULT_COVERAGE_COLOR,
-) -> None:
+    max_plot_records: int | None = 100_000,
+    show_axis_labels: bool = True,
+) -> dict:
     from matplotlib.collections import LineCollection
 
     manifest = result["manifest"]
     tile_rows = _read_csv(Path(result["tile_summary_path"]))
-    feature_rows = _read_csv(Path(result["vector_feature_records_path"]))
-    pano_rows = _read_csv(Path(result["pano_records_path"]))
+    feature_count = int(manifest.get("vector_feature_record_count", manifest.get("feature_record_count", 0)) or 0)
+    pano_count = int(manifest.get("pano_record_count", 0) or 0)
+    feature_rows = _read_csv_strided(
+        Path(result["vector_feature_records_path"]), max_plot_records, total_hint=feature_count
+    )
+    pano_rows = _read_csv_strided(Path(result["pano_records_path"]), max_plot_records, total_hint=pano_count)
     source_kind = manifest.get("source_kind", "unknown")
 
     if source_kind == "raster":
@@ -104,9 +110,17 @@ def plot_result(
         xy = np.asarray(points)
         ax.scatter(xy[:, 0], xy[:, 1], s=2.2, c=color, alpha=0.68, linewidths=0, rasterized=True)
 
-    count = len(feature_rows) + len(pano_rows)
+    count = feature_count + pano_count
     subtitle = f"{level_label}; {source_kind}; n={count:,}; tiles={len(tile_rows):,}"
-    style_geo_axis(ax, bbox, f"{label}\n{subtitle}")
+    title = "\n".join(part for part in (label, subtitle) if part)
+    style_geo_axis(ax, bbox, title, show_axis_labels=show_axis_labels)
+    return {
+        "source_kind": source_kind,
+        "tile_count": len(tile_rows),
+        "record_count": count,
+        "plotted_record_count": len(feature_rows) + len(pano_rows),
+        "error_count": int(manifest.get("error_count", 0) or 0),
+    }
 
 
 def plot_mappls_segments(
@@ -139,12 +153,41 @@ def load_mappls_segments(summary_path: str | Path) -> tuple[BoundingBox, list[li
     return bbox, segments
 
 
-def style_geo_axis(ax, bbox: BoundingBox, title: str) -> None:
+def result_tile_bbox(result: dict) -> BoundingBox:
+    manifest = result["manifest"]
+    tile_range = manifest.get("source_tile_range") or {}
+    required = {"x_min", "x_max", "y_min", "y_max"}
+    if not required.issubset(tile_range):
+        return BoundingBox.from_mapping(manifest["bbox"])
+    zoom = int(manifest["source_zoom"])
+    scheme = manifest.get("tile_grid_projection", "web_mercator")
+    northwest = tile_to_lonlat_bounds_for_scheme(
+        int(tile_range["x_min"]), int(tile_range["y_min"]), zoom, scheme
+    )
+    southeast = tile_to_lonlat_bounds_for_scheme(
+        int(tile_range["x_max"]), int(tile_range["y_max"]), zoom, scheme
+    )
+    return BoundingBox(
+        min_lon=northwest[0],
+        min_lat=southeast[1],
+        max_lon=southeast[2],
+        max_lat=northwest[3],
+    )
+
+
+def style_geo_axis(ax, bbox: BoundingBox, title: str, *, show_axis_labels: bool = True) -> None:
+    from matplotlib.ticker import MaxNLocator, ScalarFormatter
+
     ax.set_xlim(bbox.min_lon, bbox.max_lon)
     ax.set_ylim(bbox.min_lat, bbox.max_lat)
     ax.set_title(title, fontsize=8, pad=4)
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
+    ax.set_xlabel("Longitude" if show_axis_labels else "")
+    ax.set_ylabel("Latitude" if show_axis_labels else "")
+    ax.xaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+    ax.yaxis.set_major_formatter(ScalarFormatter(useOffset=False))
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.yaxis.set_major_locator(MaxNLocator(nbins=4))
+    ax.tick_params(labelsize=5.0)
     ax.grid(color="#D5DDE5", linewidth=0.45, alpha=0.75)
     mean_lat = 0.5 * (bbox.min_lat + bbox.max_lat)
     ax.set_aspect(1 / max(math.cos(math.radians(mean_lat)), 0.2), adjustable="box")
@@ -224,6 +267,16 @@ def _read_csv(path: Path) -> list[dict]:
         return []
     with path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def _read_csv_strided(path: Path, max_rows: int | None, *, total_hint: int = 0) -> list[dict]:
+    if not path.exists():
+        return []
+    if max_rows is None or max_rows <= 0 or total_hint <= max_rows:
+        return _read_csv(path)
+    stride = max(1, math.ceil(total_hint / max_rows))
+    with path.open("r", encoding="utf-8", newline="") as handle:
+        return [row for index, row in enumerate(csv.DictReader(handle)) if index % stride == 0][:max_rows]
 
 
 def _hex_to_rgba(color: str, alpha: int = 190) -> tuple[int, int, int, int]:

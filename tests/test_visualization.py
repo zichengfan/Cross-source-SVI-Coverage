@@ -3,7 +3,13 @@ from __future__ import annotations
 import csv
 import json
 
-from coverage_acquisition.visualization import geometry_parts_from_wkt, load_result_from_manifest, summarize_result
+from coverage_acquisition.visualization import (
+    _read_csv_strided,
+    geometry_parts_from_wkt,
+    load_result_from_manifest,
+    result_tile_bbox,
+    summarize_result,
+)
 
 
 def test_geometry_parts_support_points_lines_and_collections():
@@ -12,6 +18,30 @@ def test_geometry_parts_support_points_lines_and_collections():
     )
     assert points == [(90.4, 23.8)]
     assert segments == [[(90.4, 23.8), (90.5, 23.9)]]
+
+
+def test_large_record_tables_are_sampled_deterministically(tmp_path):
+    path = tmp_path / "records.csv"
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["value"])
+        writer.writeheader()
+        writer.writerows({"value": value} for value in range(10))
+
+    assert [row["value"] for row in _read_csv_strided(path, 3, total_hint=10)] == ["0", "4", "8"]
+
+
+def test_result_tile_bbox_uses_native_tile_extent():
+    result = {
+        "manifest": {
+            "bbox": {"min_lon": 90.3956, "min_lat": 23.8193, "max_lon": 90.3964, "max_lat": 23.8201},
+            "source_zoom": 7,
+            "tile_grid_projection": "web_mercator",
+            "source_tile_range": {"x_min": 96, "x_max": 96, "y_min": 55, "y_max": 55},
+        }
+    }
+    bbox = result_tile_bbox(result)
+    assert bbox.min_lon < 90.3956 < bbox.max_lon
+    assert bbox.min_lat < 23.8193 < bbox.max_lat
 
 
 def test_manifest_loader_and_summary_resolve_local_outputs(tmp_path):

@@ -505,9 +505,10 @@ PROVIDERS: dict[str, ProviderDefinition] = {
                 notes=(
                     "Barikoi ThirdEye360 coverage points from the public viewer's MVT "
                     "source; one Point represents one captured panorama. Empty tiles "
-                    "return HTTP 204. Low-zoom tiles can exceed 100 MiB, so acquisition "
-                    "should use z14 over known service bounds rather than a Bangladesh "
-                    "low-zoom sweep. No token is required by the currently observed endpoint."
+                    "return HTTP 204. Low-zoom tiles can exceed 100 MiB; multiscale "
+                    "inspection should therefore fetch one known-coverage tile at a time, "
+                    "render it, and delete the raw response. No token is required by the "
+                    "currently observed endpoint."
                 ),
             ),
         ),
