@@ -4,8 +4,9 @@ This folder contains operational examples for the shareable acquisition layer,
 not scientific analysis from the parent project.
 
 - `0001_provider_acquisition_smoke_cases.ipynb` compares providers over shared
-  case-study bounds and displays each provider from z10 through z18 over the
-  same projected 1 km × 1 km square around its existing validated centre. It
+  case-study bounds and displays each XYZ provider from z10 through z18 over
+  the same projected 1 km × 1 km square around its existing validated centre;
+  Kakao instead follows its reversed native scale from L10 through L2. It
   covers all 14 registry providers plus Tencent PMTiles and Mappls RealView.
   Validated same-area and fixed-extent maps are embedded, so they remain visible
   without the excluded raw acquisition data. Access-gated or unsupported levels

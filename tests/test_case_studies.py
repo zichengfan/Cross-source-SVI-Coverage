@@ -5,9 +5,12 @@ from pyproj import Transformer
 
 from coverage_acquisition.case_studies import (
     AREA_COMPARISON_CASES,
+    KAKAO_MULTISCALE_LEVELS,
     MULTISCALE_CASES,
+    MULTISCALE_LEVELS,
     fixed_extent_bbox,
     multiscale_plan,
+    provider_multiscale_levels,
     validate_case_contract,
     validate_multiscale_probe,
 )
@@ -43,6 +46,15 @@ def test_multiscale_plan_is_complete_and_deterministic():
     rows = multiscale_plan()
     assert len(rows) == 16 * 9
     assert len({(row["provider"], row["requested_level"]) for row in rows}) == len(rows)
+
+
+def test_kakao_levels_follow_the_native_reverse_direction():
+    assert KAKAO_MULTISCALE_LEVELS == tuple(range(10, 1, -1))
+    assert provider_multiscale_levels("kakao") == KAKAO_MULTISCALE_LEVELS
+    assert provider_multiscale_levels("naver") == MULTISCALE_LEVELS
+    assert [
+        row["requested_level"] for row in multiscale_plan() if row["provider"] == "kakao"
+    ] == list(KAKAO_MULTISCALE_LEVELS)
 
 
 def test_fixed_extent_bbox_is_one_kilometre_around_existing_anchor():

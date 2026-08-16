@@ -32,7 +32,7 @@ cells = [
         """
         # Same-area and fixed-extent provider acquisition checks
 
-        This notebook asks two operational questions: how coverage differs between providers over identical WGS84 bounds, and how coverage detail changes from z10 to z18 inside the same 1 km × 1 km extent. It covers all 16 implemented paths. Network access is disabled by default; validated map outputs are embedded while raw responses stay under the ignored `local/` directory.
+        This notebook asks two operational questions: how coverage differs between providers over identical WGS84 bounds, and how coverage detail changes across nine levels inside the same 1 km × 1 km extent (z10–z18 for XYZ sources; reversed native L10–L2 for Kakao). It covers all 16 implemented paths. Network access is disabled by default; validated map outputs are embedded while raw responses stay under the ignored `local/` directory.
         """,
     ),
     code(
@@ -70,6 +70,7 @@ cells = [
 
         from coverage_acquisition.case_studies import (
             AREA_COMPARISON_CASES,
+            KAKAO_MULTISCALE_LEVELS,
             MAPPLS_KEY,
             MULTISCALE_CASES,
             MULTISCALE_LEVELS,
@@ -79,6 +80,7 @@ cells = [
             fixed_extent_bbox,
             multiscale_case,
             multiscale_plan,
+            provider_multiscale_levels,
             validate_case_contract,
             validate_multiscale_probe,
         )
@@ -427,7 +429,7 @@ cells = [
         """
         ## 2. Same-provider, fixed-extent comparison
 
-        Each provider retains its validated centre, but every z10–z18 panel is clipped to the same projected 1 km × 1 km square. This replaces the earlier single-native-tile comparison, whose geographic extent changed with zoom. No quantitative score is calculated here; the plates are a direct visual check of coverage detail.
+        Each provider retains its validated centre, but every panel is clipped to the same projected 1 km × 1 km square. XYZ sources use z10–z18; Kakao follows its reversed native scale from L10 to L2. This replaces the earlier single-native-tile comparison, whose geographic extent changed with zoom. No quantitative score is calculated here; the plates are a direct visual check of coverage detail.
         """,
     ),
     code(
@@ -437,6 +439,7 @@ cells = [
         provider_order = [case.provider for case in MULTISCALE_CASES]
         fixed_extent_bboxes = {case.provider: fixed_extent_bbox(case) for case in MULTISCALE_CASES}
         assert MULTISCALE_LEVELS == tuple(range(10, 19))
+        assert KAKAO_MULTISCALE_LEVELS == tuple(range(10, 1, -1))
         assert len(zoom_plan_df) == 16 * 9
         """,
     ),
@@ -509,6 +512,7 @@ cells = [
             "requires token": "#FFF1C7",
             "not captured": "#EEF1F4",
             "fetch error": "#FBEAEA",
+            "capture unavailable": "#FBEAEA",
         }
 
 
@@ -525,7 +529,8 @@ cells = [
             bbox = fixed_extent_bboxes[provider_key]
             rows = zoom_plan_df.loc[zoom_plan_df["provider"].eq(provider_key)].set_index("requested_level")
             fig, axes = plt.subplots(3, 3, figsize=(8.4, 8.2), squeeze=False)
-            for ax, requested_level in zip(axes.flat, MULTISCALE_LEVELS):
+            requested_levels = provider_multiscale_levels(provider_key)
+            for ax, requested_level in zip(axes.flat, requested_levels):
                 row = rows.loc[requested_level]
                 prefix = "L" if provider_key == "kakao" else "z"
                 effective = row["effective_source_level"]
@@ -548,6 +553,9 @@ cells = [
                 try:
                     acquisition = await acquire_fixed_extent(provider_key, requested_level)
                     if acquisition["kind"] == "mappls":
+                        if int(acquisition["result"].get("captured_tile_count", 0)) == 0:
+                            status_panel(ax, bbox, level_label, "capture unavailable")
+                            continue
                         _returned_bbox, segments = load_mappls_segments(acquisition["result"]["run_summary"])
                         plot_mappls_segments(
                             ax,
@@ -616,7 +624,7 @@ cells = [
         audited = set(zoom_plan_df["provider"])
         assert implemented == compared == audited
         assert len(area_plan_df) == len(case_df)
-        assert len(zoom_plan_df) == 16 * len(MULTISCALE_LEVELS)
+        assert len(zoom_plan_df) == sum(len(provider_multiscale_levels(key)) for key in provider_order)
         assert not RUN_ACQUISITIONS
         print(
             f"Validated {len(compared)} providers, {len(AREA_COMPARISON_CASES)} same-area cases, "

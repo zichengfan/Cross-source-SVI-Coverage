@@ -13,6 +13,7 @@ TENCENT_KEY = "tencent_pmtiles_sv"
 MAPPLS_KEY = "mappls"
 DEDICATED_PROVIDER_KEYS = frozenset({TENCENT_KEY, MAPPLS_KEY})
 MULTISCALE_LEVELS = tuple(range(10, 19))
+KAKAO_MULTISCALE_LEVELS = tuple(range(10, 1, -1))
 
 
 @dataclass(frozen=True)
@@ -193,10 +194,16 @@ def fixed_extent_bbox(case: MultiscaleCase, size_m: float = 1_000.0) -> Bounding
     return _bbox(west, south, east, north)
 
 
-def multiscale_plan(levels: tuple[int, ...] = MULTISCALE_LEVELS) -> list[dict]:
+def provider_multiscale_levels(provider_key: str) -> tuple[int, ...]:
+    multiscale_case(provider_key)
+    return KAKAO_MULTISCALE_LEVELS if provider_key == "kakao" else MULTISCALE_LEVELS
+
+
+def multiscale_plan(levels: tuple[int, ...] | None = None) -> list[dict]:
     rows: list[dict] = []
     for case in MULTISCALE_CASES:
-        for requested_level in levels:
+        requested_levels = provider_multiscale_levels(case.provider) if levels is None else levels
+        for requested_level in requested_levels:
             rows.append(_multiscale_plan_row(case, int(requested_level)))
     return rows
 
