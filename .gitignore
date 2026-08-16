@@ -1,0 +1,69 @@
+# Python and test state
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Notebook state
+.ipynb_checkpoints/
+
+# Local acquisition inputs and outputs
+data/
+output/
+outputs/
+local/
+captures/
+archives/
+cache/
+tmp/
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+secrets.*
+credentials.*
+tokens.*
+**/config.local.js
+**/config.local.json
+
+# Browser and request captures
+*.har
+cookies*.json
+session*.json
+browser-profile/
+playwright-report/
+test-results/
+
+# Large runtime products
+*.tif
+*.tiff
+*.pmtiles
+*.mbtiles
+*.gpkg
+*.fgb
+*.parquet
+*.geoparquet
+*.pbf
+*.mvt
+*.zip
+*.dump
+
+# Explicitly reviewed test fixtures may override the general binary rules
+!tests/fixtures/**/*.pbf
+!tests/fixtures/**/*.mvt
+!tests/fixtures/**/*.tif
+
+# Editors and builds
+.vscode/
+.idea/
+.DS_Store
+*.swp
+build/
+dist/

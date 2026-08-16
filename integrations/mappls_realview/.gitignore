@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+captures/
+outputs/
+*.har
+*.pbf
+.env
+secrets.*
+web/config.local.js
+.ipynb_checkpoints/
+.mappls-*/

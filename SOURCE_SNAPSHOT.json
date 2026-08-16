@@ -1,0 +1,290 @@
+{
+  "schema_version": 1,
+  "created_at_utc": "2026-08-16T13:02:29Z",
+  "source_project": "/data/zicheng/2026_global_street_view_coverage/cross_source_svi_coverage",
+  "source_branch": "main",
+  "source_commit": "da63a822cf89201cf06d5670d491b377bc4db6a6",
+  "source_worktree_dirty": true,
+  "reference_snapshot": {
+    "path": "/data/zicheng/2026_global_street_view_coverage/dev_local_snapshot_2026-07-29",
+    "role": "read-only architecture reference",
+    "files_copied": 0
+  },
+  "boundary": {
+    "copy_mode": "explicit allowlist; no symlinks",
+    "source_project_modified": false,
+    "included": "coverage acquisition, decoding, manifests, tests, examples, operational documentation",
+    "excluded": "data, outputs, notebooks, scientific analysis, figures, agent records, credentials and captures"
+  },
+  "copied_files": [
+    {
+      "source": "src/coverage_acquisition/__init__.py",
+      "destination": "src/coverage_acquisition/__init__.py",
+      "source_sha256": "8329d7db049348dee209225fecae18d7715421ac2dbf181d990b654ea185e2b2",
+      "destination_sha256": "6ff42306c15f8f5407280dad7dfc11dd89f8c6fcfd91b78e2440b406ecdd9327",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/__main__.py",
+      "destination": "src/coverage_acquisition/__main__.py",
+      "source_sha256": "d9fab809c55f0887eb745b295f2032c717967ea108eaaf1253a58dbfdd5225c9",
+      "destination_sha256": "16133f6d927b0d69bac8319887039d06719bf82ec34f13f9a709395bc955cfe7",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/bounded_raster.py",
+      "destination": "src/coverage_acquisition/bounded_raster.py",
+      "source_sha256": "9a797612108b5ba41f91c28d5d7a85110e9567229c6f398214096cb321a0df7e",
+      "destination_sha256": "792c62f8f47088c6433d800e341ba3ce3ef1627bcbd7323fe23d57c807a06598",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/cli.py",
+      "destination": "src/coverage_acquisition/cli.py",
+      "source_sha256": "0c6fe47eb6c96456886dd996567f9efedbccbc00988c8f4ea999ea33ed43fd9b",
+      "destination_sha256": "65aeebb43a553596ddd624da3365022fda6be737d74ded59be76b994e2b50173",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/compare.py",
+      "destination": "src/coverage_acquisition/compare.py",
+      "source_sha256": "911b98d715db6c6a8df7c2ff9a79f681d4ad1441c2db6593f40aa161b97f43dd",
+      "destination_sha256": "911b98d715db6c6a8df7c2ff9a79f681d4ad1441c2db6593f40aa161b97f43dd",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "src/coverage_acquisition/downloaders.py",
+      "destination": "src/coverage_acquisition/downloaders.py",
+      "source_sha256": "cd9f52d697bea4e2656d3b9a0d1405a0ec19eacd7fca5265464d6e638cb17117",
+      "destination_sha256": "4433e16ef51de651d6ddd474e5d911ad389ac5f9a8a6bd8d1c5163a59db11ffc",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/geo.py",
+      "destination": "src/coverage_acquisition/geo.py",
+      "source_sha256": "5625c8a5fd55afeddf23c0236f8fc95873981f6c54518fd4d1bda61e7b6e2e41",
+      "destination_sha256": "056080be5c3df204a2866b60f6ab577eb5190d2d96af2209b64aee5ab46472c8",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/io_utils.py",
+      "destination": "src/coverage_acquisition/io_utils.py",
+      "source_sha256": "58ff29e103c8901f186c2082b7d9410d15cd526d468a0e055f70c41b614b03bf",
+      "destination_sha256": "58ff29e103c8901f186c2082b7d9410d15cd526d468a0e055f70c41b614b03bf",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "src/coverage_acquisition/kakao_frontend.py",
+      "destination": "src/coverage_acquisition/kakao_frontend.py",
+      "source_sha256": "ceb766203afa1f85c6ab59f5f8f0a8f1ec00f4192b50b8fed8ccbdf0d3c750b9",
+      "destination_sha256": "3e3069d4bec35edf3b6b5d8d42ed37117c45a424b78dafe14913653bddc65e9e",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/models.py",
+      "destination": "src/coverage_acquisition/models.py",
+      "source_sha256": "8af3ad6b1c7c10c9eba9ab54801defac3adc6b1e25107c901fcd94e6a575fdb3",
+      "destination_sha256": "8af3ad6b1c7c10c9eba9ab54801defac3adc6b1e25107c901fcd94e6a575fdb3",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "src/coverage_acquisition/mvt_decoder.py",
+      "destination": "src/coverage_acquisition/mvt_decoder.py",
+      "source_sha256": "baf4d455faa73882006867d157253b065766287905301de607808edf30365e37",
+      "destination_sha256": "981b5c2462910528b6c886010bb62166dfc0ae731195948e9e8ff6c64eb7a789",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/naver_frontend.py",
+      "destination": "src/coverage_acquisition/naver_frontend.py",
+      "source_sha256": "26290f9494902f6c524c5c3fe9863b116f13b91beddb636d24c381cfe4c4a91e",
+      "destination_sha256": "1b3ed13be77fd3ee43faebc2749632b6cbb4d81d84e586f9007bd2c46055e2b3",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/providers.py",
+      "destination": "src/coverage_acquisition/providers.py",
+      "source_sha256": "b3139e31f29b490a0c07eee8d45b2fed6c31f10ca21ee7d83a2934fc8ee0dbe1",
+      "destination_sha256": "b62453aae57c418764a2994cd1260a936d02c8d58e6101dc424d45240b9c58ca",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/runners.py",
+      "destination": "src/coverage_acquisition/runners.py",
+      "source_sha256": "f576c5b53c7fb9dd43935fdda1459bba90406c539175cb758bdd0ac98b143fb3",
+      "destination_sha256": "1463e3cf543852baa22f24afd1b33fb6db0444a6a143114e6b722a815ce555fd",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "src/coverage_acquisition/tencent_pmtiles.py",
+      "destination": "src/coverage_acquisition/tencent_pmtiles.py",
+      "source_sha256": "72be6f3b1fd4a2e89e909754db5f392ad4bdc4169301c220fcb7232e2f86b8d6",
+      "destination_sha256": "5281260cd32f92a530ba0b398e76f2017a3d822e1da7d1045c5dc3aa86fc9920",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "tests/test_bounded_raster.py",
+      "destination": "tests/test_bounded_raster.py",
+      "source_sha256": "b37c8bac1064ede20434d1f551d03c3f7745a716a1608a66df741a91cfed7fff",
+      "destination_sha256": "784889fb1d4454e54dd1e3505175bf9679c07a5efef4f2365f74994cb325c078",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "tests/test_mvt_layer_filtering.py",
+      "destination": "tests/test_mvt_layer_filtering.py",
+      "source_sha256": "3e45314b38fcde9633cd28c27b62d552f566e66ba78f0ef1f8a7a27725054bb4",
+      "destination_sha256": "3e45314b38fcde9633cd28c27b62d552f566e66ba78f0ef1f8a7a27725054bb4",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "tests/test_provider_registry_extensions.py",
+      "destination": "tests/test_provider_registry_extensions.py",
+      "source_sha256": "38d28db1e04e7d15bb97ef27baf6ef997a14204cfa9a045fc9889638186585be",
+      "destination_sha256": "fad5e1338d107da0fdd72d4167b663dbc6d543391e56014655d2f0c0fd8ceb23",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/tests/test_core.py",
+      "destination": "integrations/mappls_realview/tests/test_core.py",
+      "source_sha256": "302f8c96fe40e238f3b2db79482866837ce92e98e1256b387956734d9ce9ffd6",
+      "destination_sha256": "7d6b5063a43c4511c9d3a5e319be110256861d92cd26a225084b0fbb6f92e459",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/src/mappls_realview/__init__.py",
+      "destination": "integrations/mappls_realview/src/mappls_realview/__init__.py",
+      "source_sha256": "439c1fde0250a636ef2371c3d7083807178a8f30887319605592764febc13d69",
+      "destination_sha256": "439c1fde0250a636ef2371c3d7083807178a8f30887319605592764febc13d69",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/src/mappls_realview/bbox.py",
+      "destination": "integrations/mappls_realview/src/mappls_realview/bbox.py",
+      "source_sha256": "6f1cbaa6d066a16341e3152fbafc9d6ba300393a7074c24243f545526fdc57ea",
+      "destination_sha256": "eb45c14987fef9d72057cbd84e0e9c3b89662ce2ec9321770535d40b70cd9f0e",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/src/mappls_realview/capture.py",
+      "destination": "integrations/mappls_realview/src/mappls_realview/capture.py",
+      "source_sha256": "d8ad93f93d97ec8bc93ae17203ca042dd785533fec7867f2effc001a7f0aa4fd",
+      "destination_sha256": "4a70d658f8ce78f826d1e959dd8cdccaf0e7c3c558109598cb7f8f8a30ed3f2d",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/src/mappls_realview/geo.py",
+      "destination": "integrations/mappls_realview/src/mappls_realview/geo.py",
+      "source_sha256": "2c4fb7f60627ba44c6e7789267628d18cd40afcfd6a6b223b7c65f14377563f5",
+      "destination_sha256": "103b9d9e894eb6823b915f8791ba32060b4e5df144124e40f2a391fb0bd5eb8b",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/src/mappls_realview/mvt.py",
+      "destination": "integrations/mappls_realview/src/mappls_realview/mvt.py",
+      "source_sha256": "c23af3e9f461d37efbdd5a6bb8d8b6ef55c480ff9941994fdb4f3e47d2494346",
+      "destination_sha256": "d6976d4c635240d34fcebc6d70ff567d84db19fd1e66dcb699b0f9e33084f0a2",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/src/mappls_realview/sdk_capture.py",
+      "destination": "integrations/mappls_realview/src/mappls_realview/sdk_capture.py",
+      "source_sha256": "40aa79f33c286593b382c197c9ae751590402e66ae134ab3fca2f11216d018ff",
+      "destination_sha256": "24af10d792f87826304308d12aaed66b059882782217cca527cf40703582c68c",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/scripts/bbox_to_tiles.py",
+      "destination": "integrations/mappls_realview/scripts/bbox_to_tiles.py",
+      "source_sha256": "a7461a799168dc3f3f677f4b1dfa089a5088a567f0659ddd502d6fad8bf50a58",
+      "destination_sha256": "a7461a799168dc3f3f677f4b1dfa089a5088a567f0659ddd502d6fad8bf50a58",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/scripts/capture_sdk_bbox.py",
+      "destination": "integrations/mappls_realview/scripts/capture_sdk_bbox.py",
+      "source_sha256": "cb73be0664185aab889fd6b5199b212bff4573f42ef4d66d49b14b74e6f50c53",
+      "destination_sha256": "698cf0d3ff271ccd9483c9ebc146fc383c95b937657235c4ff22395e73c174b9",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/scripts/inspect_pbf.py",
+      "destination": "integrations/mappls_realview/scripts/inspect_pbf.py",
+      "source_sha256": "7c180779ddfd52ea782be611ec7de9bae0ff6b89fdebec80a97a40e7303e31ab",
+      "destination_sha256": "7c180779ddfd52ea782be611ec7de9bae0ff6b89fdebec80a97a40e7303e31ab",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/scripts/validate_p0_tile.py",
+      "destination": "integrations/mappls_realview/scripts/validate_p0_tile.py",
+      "source_sha256": "8f8b8cab1581ed8b5370004ca9ac377cd313222e5b0defa92d339cd6c3095748",
+      "destination_sha256": "f68e37077d048ffc7660c3e9951085be131b9f8992d40d3509c00869dc3e7a61",
+      "modified_in_shared_dev": true
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/web/app.js",
+      "destination": "integrations/mappls_realview/web/app.js",
+      "source_sha256": "7107ff8082b065ca3e8c94f3097d87ec9659f8e02f7965218ec1697dfe7d5146",
+      "destination_sha256": "7107ff8082b065ca3e8c94f3097d87ec9659f8e02f7965218ec1697dfe7d5146",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/web/config.example.js",
+      "destination": "integrations/mappls_realview/web/config.example.js",
+      "source_sha256": "0fe10f40f0b39c085fa76ff47a7740612237e3c7fdae031ef053ca03c439e667",
+      "destination_sha256": "0fe10f40f0b39c085fa76ff47a7740612237e3c7fdae031ef053ca03c439e667",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/web/index.html",
+      "destination": "integrations/mappls_realview/web/index.html",
+      "source_sha256": "34ff455b31fd0851935fa6ba013e5de2d2d1691ae80b3e6025bc8c37dbb6c646",
+      "destination_sha256": "34ff455b31fd0851935fa6ba013e5de2d2d1691ae80b3e6025bc8c37dbb6c646",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/web/styles.css",
+      "destination": "integrations/mappls_realview/web/styles.css",
+      "source_sha256": "ddef1492afdb6c725910e30ecb584943286f4b493bc92ebb3463fa2de5adad34",
+      "destination_sha256": "ddef1492afdb6c725910e30ecb584943286f4b493bc92ebb3463fa2de5adad34",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/docs/REQUEST_STRUCTURE.md",
+      "destination": "integrations/mappls_realview/docs/REQUEST_STRUCTURE.md",
+      "source_sha256": "88db293d0eadc26ad5a39efc9a8b0e23e692efd49067f4f15fe13947f1abb561",
+      "destination_sha256": "88db293d0eadc26ad5a39efc9a8b0e23e692efd49067f4f15fe13947f1abb561",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/docs/SDK_WORKFLOW.md",
+      "destination": "integrations/mappls_realview/docs/SDK_WORKFLOW.md",
+      "source_sha256": "66479b9d7ef4f6bbe4e5fc3f10d737967645a7d76052d032d2d7d2250f27452f",
+      "destination_sha256": "66479b9d7ef4f6bbe4e5fc3f10d737967645a7d76052d032d2d7d2250f27452f",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/docs/TROUBLESHOOTING.md",
+      "destination": "integrations/mappls_realview/docs/TROUBLESHOOTING.md",
+      "source_sha256": "10fe2f3876894513a43cc49018ce9cc6545d3414792859be8a453569fc1074c4",
+      "destination_sha256": "10fe2f3876894513a43cc49018ce9cc6545d3414792859be8a453569fc1074c4",
+      "modified_in_shared_dev": false
+    },
+    {
+      "source": "mappls_realview_coverage_toolkit/pyproject.toml",
+      "destination": "integrations/mappls_realview/pyproject.toml",
+      "source_sha256": "66c613d5c5f855fb06e9cd7362944e3e6c8c783af42492b5705f6e4dbac99f4c",
+      "destination_sha256": "4cdf26a69981ef4e7bc94f559d546bba5b34f2791011e5411dbb72db5812ad56",
+      "modified_in_shared_dev": true
+    }
+  ],
+  "generated_files": [
+    {
+      "path": "uv.lock",
+      "sha256": "9904e4f75a1bef5fb1cc7c12ce02f1410f6763b84ced93c6f0e51a5381eb83f0"
+    },
+    {
+      "path": "integrations/mappls_realview/uv.lock",
+      "sha256": "7b3529ae71591b92ec92e2f9aec56f1ced711f4d53615b050f315a83a8520121"
+    }
+  ]
+}
