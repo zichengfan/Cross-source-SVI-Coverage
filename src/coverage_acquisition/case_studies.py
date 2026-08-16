@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pyproj import Transformer
+
 from coverage_acquisition.geo import tile_range_for_bbox
 from coverage_acquisition.models import BoundingBox
 from coverage_acquisition.providers import PROVIDERS
@@ -10,7 +12,7 @@ from coverage_acquisition.runners import resolve_source_for_display_zoom
 TENCENT_KEY = "tencent_pmtiles_sv"
 MAPPLS_KEY = "mappls"
 DEDICATED_PROVIDER_KEYS = frozenset({TENCENT_KEY, MAPPLS_KEY})
-MULTISCALE_LEVELS = tuple(range(5, 18))
+MULTISCALE_LEVELS = tuple(range(10, 19))
 
 
 @dataclass(frozen=True)
@@ -177,6 +179,20 @@ def multiscale_probe_bbox(case: MultiscaleCase, half_span_degrees: float = 0.000
     )
 
 
+def fixed_extent_bbox(case: MultiscaleCase, size_m: float = 1_000.0) -> BoundingBox:
+    if size_m <= 0:
+        raise ValueError("size_m must be positive")
+    zone = int((case.anchor_lon + 180.0) // 6.0) + 1
+    epsg = 32600 + zone if case.anchor_lat >= 0 else 32700 + zone
+    to_local = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+    to_wgs84 = Transformer.from_crs(f"EPSG:{epsg}", "EPSG:4326", always_xy=True)
+    center_x, center_y = to_local.transform(case.anchor_lon, case.anchor_lat)
+    half_size = size_m / 2.0
+    west, south = to_wgs84.transform(center_x - half_size, center_y - half_size)
+    east, north = to_wgs84.transform(center_x + half_size, center_y + half_size)
+    return _bbox(west, south, east, north)
+
+
 def multiscale_plan(levels: tuple[int, ...] = MULTISCALE_LEVELS) -> list[dict]:
     rows: list[dict] = []
     for case in MULTISCALE_CASES:
@@ -229,8 +245,8 @@ def _multiscale_plan_row(case: MultiscaleCase, requested_level: int) -> dict:
         return {**base, "plan_status": "unsupported", "note": "Outside the declared source level range."}
 
     source_level = int(source.query_zoom or requested_level)
-    point_bbox = BoundingBox(case.anchor_lon, case.anchor_lat, case.anchor_lon, case.anchor_lat)
-    tile_count = tile_range_for_bbox(point_bbox, source_level, provider.coordinate_scheme).count
+    roi = fixed_extent_bbox(case)
+    tile_count = tile_range_for_bbox(roi, source_level, provider.coordinate_scheme).count
     row = {
         **base,
         "effective_source_level": source_level,

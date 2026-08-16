@@ -66,6 +66,7 @@ def plot_result(
     color: str = DEFAULT_COVERAGE_COLOR,
     max_plot_records: int | None = 100_000,
     show_axis_labels: bool = True,
+    show_counts: bool = True,
 ) -> dict:
     from matplotlib.collections import LineCollection
 
@@ -111,7 +112,9 @@ def plot_result(
         ax.scatter(xy[:, 0], xy[:, 1], s=2.2, c=color, alpha=0.68, linewidths=0, rasterized=True)
 
     count = feature_count + pano_count
-    subtitle = f"{level_label}; {source_kind}; n={count:,}; tiles={len(tile_rows):,}"
+    subtitle = f"{level_label}; {source_kind}"
+    if show_counts:
+        subtitle += f"; n={count:,}; tiles={len(tile_rows):,}"
     title = "\n".join(part for part in (label, subtitle) if part)
     style_geo_axis(ax, bbox, title, show_axis_labels=show_axis_labels)
     return {
@@ -131,12 +134,17 @@ def plot_mappls_segments(
     label: str,
     level_label: str,
     color: str = DEFAULT_COVERAGE_COLOR,
+    show_counts: bool = True,
 ) -> None:
     from matplotlib.collections import LineCollection
 
     if segments:
         ax.add_collection(LineCollection(segments, colors=color, linewidths=0.7, alpha=0.82))
-    style_geo_axis(ax, bbox, f"{label}\n{level_label}; vector lines; n={len(segments):,}")
+    subtitle = f"{level_label}; vector lines"
+    if show_counts:
+        subtitle += f"; n={len(segments):,}"
+    title = "\n".join(part for part in (label, subtitle) if part)
+    style_geo_axis(ax, bbox, title)
 
 
 def load_mappls_segments(summary_path: str | Path) -> tuple[BoundingBox, list[list[tuple[float, float]]]]:

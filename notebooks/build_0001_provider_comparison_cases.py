@@ -30,9 +30,9 @@ cells = [
     markdown(
         "title",
         """
-        # Same-area and multiscale provider acquisition checks
+        # Same-area and fixed-extent provider acquisition checks
 
-        This notebook asks two operational questions: how coverage differs between providers over identical WGS84 bounds, and which levels remain usable for the same provider at a fixed covered location. It covers all 16 implemented paths. Network access is disabled by default; raw responses and figures stay under the ignored `local/` directory.
+        This notebook asks two operational questions: how coverage differs between providers over identical WGS84 bounds, and how coverage detail changes from z10 to z18 inside the same 1 km × 1 km extent. It covers all 16 implemented paths. Network access is disabled by default; validated map outputs are embedded while raw responses stay under the ignored `local/` directory.
         """,
     ),
     code(
@@ -50,8 +50,7 @@ cells = [
         import pandas as pd
         from IPython.display import Image as NotebookImage
         from IPython.display import display
-        from matplotlib.colors import BoundaryNorm, ListedColormap
-        from matplotlib.patches import Patch, Rectangle
+        from matplotlib.colors import ListedColormap
 
 
         def find_project_root(start: Path) -> Path:
@@ -77,9 +76,9 @@ cells = [
             PROVIDER_LABELS,
             TENCENT_KEY,
             area_case,
+            fixed_extent_bbox,
             multiscale_case,
             multiscale_plan,
-            multiscale_probe_bbox,
             validate_case_contract,
             validate_multiscale_probe,
         )
@@ -96,7 +95,6 @@ cells = [
             load_result_from_manifest,
             plot_mappls_segments,
             plot_result,
-            result_tile_bbox,
             style_geo_axis,
         )
         mpl.rcParams.update(
@@ -127,17 +125,26 @@ cells = [
         """
         ALLOW_NETWORK = os.getenv("SVI_NOTEBOOK_ALLOW_NETWORK") == "1"
         SHOW_REFERENCE_MAPS = os.getenv("SVI_SHOW_REFERENCE_MAPS") == "1"
-        CAPTURE_BARIKOI_MAPS = os.getenv("SVI_CAPTURE_BARIKOI_MAPS") == "1"
+        CAPTURE_FIXED_EXTENT_MAPS = os.getenv("SVI_CAPTURE_FIXED_EXTENT_MAPS") == "1"
+        FORCE_FIXED_EXTENT_REFRESH = os.getenv("SVI_FORCE_FIXED_EXTENT_REFRESH") == "1"
         RUN_ACQUISITIONS: set[tuple[str, str]] = set()
-        RUN_MULTISCALE_PROBES: set[tuple[str, int]] = set()
-        AUTHORIZED_ACCESS_GATED: set[str] = set()
+        AUTHORIZED_ACCESS_GATED = {
+            value.strip()
+            for value in os.getenv("SVI_AUTHORIZED_ACCESS_GATED", "").split(",")
+            if value.strip()
+        }
+        FIXED_EXTENT_PROVIDER_FILTER = {
+            value.strip()
+            for value in os.getenv("SVI_FIXED_EXTENT_PROVIDERS", "").split(",")
+            if value.strip()
+        }
         RENDER_CASES: tuple[str, ...] = ()
-        FOCAL_MULTISCALE_PROVIDER = "barikoi"
 
         OUTPUT_ROOT = PROJECT_ROOT / "local" / "provider_comparison_cases"
         FIGURE_ROOT = OUTPUT_ROOT / "figures"
         REFERENCE_FIGURE_ROOT = OUTPUT_ROOT / "reference_figures"
         MAPILLARY_ACCESS_TOKEN = os.getenv("MAPILLARY_ACCESS_TOKEN")
+        MAPPLS_CHROME_EXECUTABLE = os.getenv("MAPPLS_CHROME_EXECUTABLE")
         TENCENT_PMTILES_URL = os.getenv("TENCENT_PMTILES_URL", DEFAULT_TENCENT_PMTILES_URL)
         """,
     ),
@@ -418,287 +425,187 @@ cells = [
     markdown(
         "multiscale-title",
         """
-        ## 2. Same-provider, multiscale comparison
+        ## 2. Same-provider, fixed-extent comparison
 
-        Each provider keeps its existing case location and deterministic covered anchor. The audit distinguishes requested level from effective source level and never interprets an access or safety gate as absence of coverage.
+        Each provider retains its validated centre, but every z10–z18 panel is clipped to the same projected 1 km × 1 km square. This replaces the earlier single-native-tile comparison, whose geographic extent changed with zoom. No quantitative score is calculated here; the plates are a direct visual check of coverage detail.
         """,
     ),
     code(
-        "multiscale-plan",
+        "fixed-extent-contract",
         """
         zoom_plan_df = pd.DataFrame(multiscale_plan())
-        display(
-            zoom_plan_df.groupby(["provider", "plan_status"], as_index=False)
-            .size()
-            .sort_values(["provider", "plan_status"])
-        )
-
-        barikoi_plan = zoom_plan_df.loc[
-            zoom_plan_df["provider"].eq("barikoi"),
-            ["requested_level", "effective_source_level", "source_id", "planned_tiles", "plan_status", "note"],
-        ]
-        display(barikoi_plan)
-        """,
-    ),
-    code(
-        "multiscale-matrix",
-        """
-        status_order = ["unsupported", "access_gated", "requires_token", "native_archive", "planned"]
-        status_colors = ["#E5E7EB", "#B79AC8", "#E7C97B", "#79AFC3", "#6FAF8E"]
-        status_index = {status: index for index, status in enumerate(status_order)}
         provider_order = [case.provider for case in MULTISCALE_CASES]
-        matrix = np.zeros((len(provider_order), len(MULTISCALE_LEVELS)), dtype=int)
-        for row_index, provider_key in enumerate(provider_order):
-            provider_rows = zoom_plan_df.loc[zoom_plan_df["provider"].eq(provider_key)].set_index("requested_level")
-            for column_index, level in enumerate(MULTISCALE_LEVELS):
-                matrix[row_index, column_index] = status_index[provider_rows.loc[level, "plan_status"]]
-
-        cmap = ListedColormap(status_colors)
-        norm = BoundaryNorm(np.arange(-0.5, len(status_order) + 0.5), cmap.N)
-        fig, ax = plt.subplots(figsize=(10.8, 6.4))
-        ax.imshow(matrix, cmap=cmap, norm=norm, aspect="auto")
-        ax.set_xticks(range(len(MULTISCALE_LEVELS)), [f"z{level}" for level in MULTISCALE_LEVELS])
-        ax.set_yticks(range(len(provider_order)), [PROVIDER_LABELS[key] for key in provider_order])
-        ax.set_xlabel("Requested level (Kakao row uses native L-levels)")
-        ax.set_title("Multiscale acquisition plan and safety gates", fontsize=10, pad=10)
-        barikoi_index = provider_order.index("barikoi")
-        ax.add_patch(Rectangle((-0.5, barikoi_index - 0.5), len(MULTISCALE_LEVELS), 1, fill=False, edgecolor="#8A4B08", linewidth=1.4))
-        ax.legend(
-            handles=[Patch(facecolor=color, label=status.replace("_", " ")) for status, color in zip(status_order, status_colors)],
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.10),
-            ncol=3,
-        )
-        fig.tight_layout()
-        plt.show()
+        fixed_extent_bboxes = {case.provider: fixed_extent_bbox(case) for case in MULTISCALE_CASES}
+        assert MULTISCALE_LEVELS == tuple(range(10, 19))
+        assert len(zoom_plan_df) == 16 * 9
         """,
     ),
     markdown(
-        "barikoi-note",
+        "fixed-extent-build-note",
         """
-        ### Barikoi correction and ephemeral rendering
+        ### Acquisition and cleanup behaviour
 
-        The earlier multiscale failure came from notebook-local registration: the comparison cell registered Barikoi, but the later audit could run without that state and returned `Provider registration missing`. Barikoi is now a permanent shared registry provider, and every provider-declared level from z7 through z17 is permitted. Because low-level ThirdEye360 tiles may be large, the reference build processes one tile at a time and deletes its raw run directory immediately after drawing the panel.
+        The reference build processes one provider and one zoom at a time. It renders the returned coverage inside the fixed square, saves the compact 3 × 3 plate, and then deletes that zoom's raw response directory. Unsupported or inaccessible levels are labelled explicitly and are not interpreted as absent coverage.
         """,
     ),
     code(
-        "multiscale-acquisition",
+        "fixed-extent-acquisition",
         """
-        assert validate_multiscale_probe("barikoi", 7)["source_id"] == "barikoi_thirdeye360_mvt"
-        assert validate_multiscale_probe("barikoi", 17)["source_id"] == "barikoi_thirdeye360_mvt"
-
-
-        async def acquire_multiscale_probe(provider_key: str, requested_level: int):
+        async def acquire_fixed_extent(provider_key: str, requested_level: int):
             plan = validate_multiscale_probe(provider_key, requested_level)
             if not ALLOW_NETWORK:
-                raise RuntimeError("Set ALLOW_NETWORK=True before running a multiscale probe.")
+                raise RuntimeError("Set SVI_NOTEBOOK_ALLOW_NETWORK=1 before building fixed-extent maps.")
             if provider_key in {"apple_lookaround", MAPPLS_KEY} and provider_key not in AUTHORIZED_ACCESS_GATED:
-                raise PermissionError(f"Add {provider_key!r} to AUTHORIZED_ACCESS_GATED after authorization review.")
-            case = multiscale_case(provider_key)
-            bbox = multiscale_probe_bbox(case)
-            run_label = f"multiscale_{provider_key}_l{requested_level}"
+                raise PermissionError(f"Authorize {provider_key!r} through SVI_AUTHORIZED_ACCESS_GATED.")
+            bbox = fixed_extent_bboxes[provider_key]
+            run_label = f"fixed_extent_{provider_key}_z{requested_level}"
+            ephemeral_root = OUTPUT_ROOT / "ephemeral" / provider_key / f"z{requested_level}"
             if provider_key in PROVIDERS:
                 if provider_key == "mapillary" and not MAPILLARY_ACCESS_TOKEN:
                     raise RuntimeError("Set MAPILLARY_ACCESS_TOKEN in the environment.")
-                return fetch_provider_coverage(
+                batch = fetch_provider_coverage(
                     FetchAreaRequest(
                         provider=provider_key,
                         bbox=bbox,
-                        output_root=OUTPUT_ROOT,
+                        output_root=ephemeral_root,
                         display_zoom=requested_level,
                         stop_on_error=False,
-                        timeout_seconds=180 if provider_key == "barikoi" else 30,
+                        timeout_seconds=180 if provider_key == "barikoi" else (10 if provider_key == "yandex" else 30),
                         run_label=run_label,
                         access_token=MAPILLARY_ACCESS_TOKEN if provider_key == "mapillary" else None,
                     )
                 )
+                return {"kind": "registry", "result": batch["results"][0], "cleanup_root": ephemeral_root}
             if provider_key == TENCENT_KEY:
-                return fetch_tencent_pmtiles_sv_coverage(
+                batch = fetch_tencent_pmtiles_sv_coverage(
                     bbox,
-                    output_root=OUTPUT_ROOT,
-                    cache_dir=OUTPUT_ROOT / "tencent_pmtiles_cache",
+                    output_root=ephemeral_root,
+                    cache_dir=ephemeral_root / "cache",
                     source_url=TENCENT_PMTILES_URL,
                     source_zoom=int(plan["effective_source_level"]),
                     run_label=f"{run_label}_subbox_00",
                 )
+                return {"kind": "registry", "result": batch["results"][0], "cleanup_root": ephemeral_root}
             sdk_bbox = MapplsBBox(bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat)
-            return await capture_sdk_bbox_async(
+            result = await capture_sdk_bbox_async(
                 web_dir=PROJECT_ROOT / "integrations" / "mappls_realview" / "web",
                 bbox=sdk_bbox,
                 zoom=requested_level,
-                out_dir=OUTPUT_ROOT / "mappls_realview",
+                out_dir=ephemeral_root,
                 output_mode="production",
-                run_id=f"{run_label}_mappls",
+                run_id=run_label,
                 headless=True,
+                chrome_executable=MAPPLS_CHROME_EXECUTABLE,
             )
-
-
-        live_multiscale_results = {}
-        for provider_key, requested_level in sorted(RUN_MULTISCALE_PROBES):
-            live_multiscale_results[(provider_key, requested_level)] = await acquire_multiscale_probe(
-                provider_key, requested_level
-            )
-        print(f"Live multiscale probes executed: {len(live_multiscale_results)}")
-        """,
-    ),
-    markdown(
-        "multiscale-reference-title",
-        """
-        ### Validated multiscale map outputs
-
-        These plates show the actual returned coverage artifact at each requested level. Status-only panels identify unsupported, empty, gated or failed requests rather than treating them as evidence of absent coverage.
+            return {"kind": "mappls", "result": result, "cleanup_root": ephemeral_root}
         """,
     ),
     code(
-        "multiscale-reference-maps",
+        "fixed-extent-render",
         """
-        multiscale_reference_paths = sorted(REFERENCE_FIGURE_ROOT.glob("multiscale_*.png"))
-        if SHOW_REFERENCE_MAPS and multiscale_reference_paths:
-            for path in multiscale_reference_paths:
-                display(NotebookImage(filename=str(path)))
-        else:
-            print(f"Embedded validated multiscale plates: {len(multiscale_reference_paths)} staged for this execution.")
-        """,
-    ),
-    code(
-        "multiscale-render",
-        """
-        def multiscale_registry_manifest(provider_key, requested_level):
-            namespace = PROVIDERS[provider_key].output_namespace
-            run_label = f"multiscale_{provider_key}_l{requested_level}_subbox_00"
-            return OUTPUT_ROOT / namespace / run_label / "manifest.json"
+        STATUS_COLORS = {
+            "unsupported": "#E5E7EB",
+            "access gated": "#E8DDF0",
+            "requires token": "#FFF1C7",
+            "not captured": "#EEF1F4",
+            "fetch error": "#FBEAEA",
+        }
 
 
-        def multiscale_tencent_manifest(provider_key, requested_level):
-            run_label = f"multiscale_{provider_key}_l{requested_level}_subbox_00"
-            return OUTPUT_ROOT / provider_key / run_label / "manifest.json"
+        def status_panel(ax, bbox, title, status):
+            style_geo_axis(ax, bbox, title, show_axis_labels=False)
+            ax.set_facecolor(STATUS_COLORS[status])
+            ax.text(0.5, 0.5, status, transform=ax.transAxes, ha="center", va="center", color="#46525C")
+            ax.set_xticks([])
+            ax.set_yticks([])
 
 
-        def render_multiscale_provider(provider_key: str):
+        async def render_fixed_extent_provider(provider_key: str):
             case = multiscale_case(provider_key)
-            bbox = multiscale_probe_bbox(case)
+            bbox = fixed_extent_bboxes[provider_key]
             rows = zoom_plan_df.loc[zoom_plan_df["provider"].eq(provider_key)].set_index("requested_level")
-            fig, axes = plt.subplots(4, 4, figsize=(9.2, 8.2), squeeze=False)
+            fig, axes = plt.subplots(3, 3, figsize=(8.4, 8.2), squeeze=False)
             for ax, requested_level in zip(axes.flat, MULTISCALE_LEVELS):
                 row = rows.loc[requested_level]
                 prefix = "L" if provider_key == "kakao" else "z"
-                level_label = f"requested {prefix}{requested_level}"
-                rendered = False
-                if provider_key in PROVIDERS:
-                    path = multiscale_registry_manifest(provider_key, requested_level)
-                    if path.exists():
-                        result = load_result_from_manifest(path)
-                        plot_result(
-                            ax,
-                            result,
-                            bbox=result_tile_bbox(result),
-                            label=PROVIDER_LABELS[provider_key],
-                            level_label=level_label,
-                        )
-                        rendered = True
-                elif provider_key == TENCENT_KEY:
-                    path = multiscale_tencent_manifest(provider_key, requested_level)
-                    if path.exists():
-                        plot_result(
-                            ax,
-                            load_result_from_manifest(path),
-                            bbox=bbox,
-                            label=PROVIDER_LABELS[provider_key],
-                            level_label=level_label,
-                        )
-                        rendered = True
-                if not rendered:
-                    status = row["plan_status"].replace("_", " ")
-                    status_color = status_colors[status_index[row["plan_status"]]]
-                    ax.set_facecolor(status_color)
-                    ax.set_title(f"{level_label}\\n{status}", fontsize=8, pad=4)
-                    ax.text(0.5, 0.5, status, transform=ax.transAxes, ha="center", va="center", color="#3F4B55")
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                    for spine in ax.spines.values():
-                        spine.set_visible(False)
-            for ax in axes.flat[len(MULTISCALE_LEVELS) :]:
-                ax.axis("off")
-            fig.suptitle(
-                f"{PROVIDER_LABELS[provider_key]} in {case.area}: single-tile multiscale comparison",
-                fontsize=10,
-                fontweight="bold",
-            )
-            fig.tight_layout(rect=(0, 0, 1, 0.95))
-            return fig
-
-
-        async def capture_barikoi_multiscale_and_cleanup():
-            provider_key = "barikoi"
-            rows = zoom_plan_df.loc[zoom_plan_df["provider"].eq(provider_key)].set_index("requested_level")
-            fig, axes = plt.subplots(4, 4, figsize=(9.2, 8.2), squeeze=False)
-            audit_rows = []
-            for ax, requested_level in zip(axes.flat, MULTISCALE_LEVELS):
-                row = rows.loc[requested_level]
+                effective = row["effective_source_level"]
+                effective_note = "" if pd.isna(effective) or int(effective) == requested_level else f" → source z{int(effective)}"
+                level_label = f"requested {prefix}{requested_level}{effective_note}"
                 if row["plan_status"] == "unsupported":
-                    ax.set_facecolor(status_colors[status_index["unsupported"]])
-                    ax.text(0.5, 0.5, "unsupported", transform=ax.transAxes, ha="center", va="center")
-                    ax.set_title(f"requested z{requested_level}\\nunsupported", fontsize=8, pad=4)
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                    for spine in ax.spines.values():
-                        spine.set_visible(False)
-                    audit_rows.append({"requested_level": requested_level, "status": "unsupported"})
+                    status_panel(ax, bbox, level_label, "unsupported")
+                    continue
+                if row["plan_status"] == "access_gated" and provider_key not in AUTHORIZED_ACCESS_GATED:
+                    status_panel(ax, bbox, level_label, "access gated")
+                    continue
+                if row["plan_status"] == "requires_token" and not MAPILLARY_ACCESS_TOKEN:
+                    status_panel(ax, bbox, level_label, "requires token")
+                    continue
+                if not CAPTURE_FIXED_EXTENT_MAPS:
+                    status_panel(ax, bbox, level_label, "not captured")
                     continue
 
-                result = None
+                acquisition = None
                 try:
-                    manifest_path = multiscale_registry_manifest(provider_key, requested_level)
-                    if manifest_path.exists():
-                        result = load_result_from_manifest(manifest_path)
+                    acquisition = await acquire_fixed_extent(provider_key, requested_level)
+                    if acquisition["kind"] == "mappls":
+                        _returned_bbox, segments = load_mappls_segments(acquisition["result"]["run_summary"])
+                        plot_mappls_segments(
+                            ax,
+                            segments,
+                            bbox=bbox,
+                            label="",
+                            level_label=level_label,
+                            show_counts=False,
+                        )
                     else:
-                        batch_result = await acquire_multiscale_probe(provider_key, requested_level)
-                        result = batch_result["results"][0]
-                    summary = plot_result(
-                        ax,
-                        result,
-                        bbox=result_tile_bbox(result),
-                        label="",
-                        level_label=f"requested z{requested_level}",
-                        max_plot_records=50_000,
-                        show_axis_labels=False,
-                    )
-                    audit_rows.append({"requested_level": requested_level, "status": "rendered", **summary})
+                        plot_result(
+                            ax,
+                            acquisition["result"],
+                            bbox=bbox,
+                            label="",
+                            level_label=level_label,
+                            max_plot_records=50_000,
+                            show_axis_labels=False,
+                            show_counts=False,
+                        )
                 except Exception as exc:
-                    ax.set_facecolor("#FBEAEA")
-                    ax.text(0.5, 0.5, type(exc).__name__, transform=ax.transAxes, ha="center", va="center")
-                    ax.set_title(f"requested z{requested_level}\\nfetch error", fontsize=8, pad=4)
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                    for spine in ax.spines.values():
-                        spine.set_visible(False)
-                    audit_rows.append(
-                        {"requested_level": requested_level, "status": "error", "error_type": type(exc).__name__}
-                    )
+                    status_panel(ax, bbox, f"{level_label}\\n{type(exc).__name__}", "fetch error")
                 finally:
-                    if result is not None:
-                        shutil.rmtree(Path(result["output_dir"]), ignore_errors=False)
+                    if acquisition is not None:
+                        shutil.rmtree(Path(acquisition["cleanup_root"]), ignore_errors=False)
 
-            for ax in axes.flat[len(MULTISCALE_LEVELS) :]:
-                ax.axis("off")
             fig.suptitle(
-                "Barikoi ThirdEye360 in Dhaka: one-tile multiscale coverage",
+                f"{PROVIDER_LABELS[provider_key]} in {case.area}: fixed 1 km × 1 km coverage extent",
                 fontsize=10,
                 fontweight="bold",
             )
             fig.tight_layout(rect=(0, 0, 1, 0.95))
-            return fig, pd.DataFrame(audit_rows)
+            REFERENCE_FIGURE_ROOT.mkdir(parents=True, exist_ok=True)
+            output_path = REFERENCE_FIGURE_ROOT / f"fixed_extent_{provider_key}.png"
+            fig.savefig(output_path, dpi=130, bbox_inches="tight", facecolor="white")
+            plt.close(fig)
+            return output_path
 
 
-        if CAPTURE_BARIKOI_MAPS:
+        if CAPTURE_FIXED_EXTENT_MAPS:
             if not ALLOW_NETWORK:
-                raise RuntimeError("SVI_CAPTURE_BARIKOI_MAPS=1 also requires SVI_NOTEBOOK_ALLOW_NETWORK=1.")
-            barikoi_figure, barikoi_capture_df = await capture_barikoi_multiscale_and_cleanup()
-            display(barikoi_capture_df)
-            plt.show()
+                raise RuntimeError("SVI_CAPTURE_FIXED_EXTENT_MAPS=1 also requires SVI_NOTEBOOK_ALLOW_NETWORK=1.")
+            for provider_key in provider_order:
+                if FIXED_EXTENT_PROVIDER_FILTER and provider_key not in FIXED_EXTENT_PROVIDER_FILTER:
+                    continue
+                output_path = REFERENCE_FIGURE_ROOT / f"fixed_extent_{provider_key}.png"
+                if FORCE_FIXED_EXTENT_REFRESH or not output_path.exists():
+                    await render_fixed_extent_provider(provider_key)
+
+        fixed_extent_reference_paths = [
+            REFERENCE_FIGURE_ROOT / f"fixed_extent_{provider_key}.png" for provider_key in provider_order
+        ]
+        available_fixed_extent_paths = [path for path in fixed_extent_reference_paths if path.exists()]
+        if SHOW_REFERENCE_MAPS and available_fixed_extent_paths:
+            for path in available_fixed_extent_paths:
+                display(NotebookImage(filename=str(path)))
         else:
-            render_multiscale_provider(FOCAL_MULTISCALE_PROVIDER)
-            plt.show()
+            print(f"Embedded fixed-extent plates staged for this execution: {len(available_fixed_extent_paths)}")
         """,
     ),
     code(
@@ -710,12 +617,11 @@ cells = [
         assert implemented == compared == audited
         assert len(area_plan_df) == len(case_df)
         assert len(zoom_plan_df) == 16 * len(MULTISCALE_LEVELS)
-        assert not RUN_ACQUISITIONS and not RUN_MULTISCALE_PROBES
+        assert not RUN_ACQUISITIONS
         print(
             f"Validated {len(compared)} providers, {len(AREA_COMPARISON_CASES)} same-area cases, "
-            f"and {len(zoom_plan_df)} multiscale plan rows. "
-            f"Reference maps displayed: {len(area_reference_paths) + len(multiscale_reference_paths)}; "
-            f"Barikoi live capture: {CAPTURE_BARIKOI_MAPS}."
+            f"and {len(zoom_plan_df)} fixed-extent provider-level combinations. "
+            f"Reference maps displayed: {len(area_reference_paths) + len(available_fixed_extent_paths)}."
         )
         """,
     ),
