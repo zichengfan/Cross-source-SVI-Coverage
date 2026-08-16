@@ -4,7 +4,8 @@ This repository contains the shareable acquisition layer of the global
 street-view coverage project. It discovers, downloads, decodes and validates
 **coverage metadata and coverage overlays**. It does not download panorama
 imagery and does not contain the parent project's demographic analysis,
-figures, notebooks or local datasets.
+figures, research notebooks or local datasets. The one notebook retained here
+is an operational, offline-by-default smoke test for the acquisition APIs.
 
 ## Supported acquisition paths
 
@@ -26,6 +27,13 @@ job.
 uv sync --extra dev
 uv run coverage-acquisition list-providers
 uv run pytest
+```
+
+To run the provider smoke-case notebook locally:
+
+```bash
+uv sync --extra dev --extra notebook
+uv run jupyter lab notebooks/
 ```
 
 Equivalent editable installation with pip:
@@ -55,6 +63,8 @@ requirements and rate limits remain the operator's responsibility.
 - `integrations/mappls_realview/`: authorized Mappls Web SDK workflow.
 - `tests/`: offline acquisition and decoding tests.
 - `examples/`: small operator-facing entry points.
+- `notebooks/`: offline-by-default provider call cases and acquisition-oriented
+  visual checks; not scientific analysis.
 - `docs/`: operational status and acquisition contracts.
 
 Raw responses, credentials, data archives, derived coverage layers and analysis

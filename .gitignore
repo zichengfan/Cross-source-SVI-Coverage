@@ -13,6 +13,16 @@ htmlcov/
 # Notebook state
 .ipynb_checkpoints/
 
+# Reproducible document build state (keep .tex and final .pdf)
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.xdv
+
 # Local acquisition inputs and outputs
 data/
 output/

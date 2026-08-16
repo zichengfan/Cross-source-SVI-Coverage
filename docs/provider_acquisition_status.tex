@@ -1,0 +1,114 @@
+\documentclass[9pt,a4paper]{article}
+\usepackage[a4paper,landscape,margin=10mm,headsep=3mm,footskip=7mm]{geometry}
+\usepackage{fontspec}
+\usepackage[table]{xcolor}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{ragged2e}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+\setsansfont{TeX Gyre Heros}
+\renewcommand{\familydefault}{\sfdefault}
+\setlength{\parindent}{0pt}
+\setlength{\tabcolsep}{3.2pt}
+\renewcommand{\arraystretch}{1.22}
+\definecolor{navy}{HTML}{17365D}
+\definecolor{pale}{HTML}{EDF3F8}
+\definecolor{rule}{HTML}{AAB7C4}
+\definecolor{muted}{HTML}{52606D}
+\definecolor{green}{HTML}{2E7D32}
+\definecolor{amber}{HTML}{9A6700}
+\definecolor{red}{HTML}{A61B1B}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\footnotesize\color{muted}Cross-source SVI coverage acquisition}
+\rhead{\footnotesize\color{muted}Operational snapshot --- 16 August 2026}
+\cfoot{\footnotesize\color{muted}\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+\newcolumntype{L}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+\newcommand{\status}[2]{\textcolor{#1}{\bfseries #2}}
+
+\begin{document}
+\begin{minipage}[t]{0.74\textwidth}
+  {\LARGE\bfseries\color{navy}Provider acquisition status and next actions}\\[1mm]
+  {\small Operational source of truth for the 16 implemented coverage-acquisition paths. An implemented path is not evidence of official API status, permission for bulk use, or complete geographic acquisition.}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.23\textwidth}
+  \RaggedLeft\small
+  \textbf{Snapshot:} 2026-08-16\\
+  \textbf{Scope:} acquisition only\\
+  \textbf{Target levels:} provisional
+\end{minipage}
+
+\vspace{3mm}
+\scriptsize
+\rowcolors{2}{pale}{white}
+\begin{longtable}{L{2.25cm} L{4.05cm} L{6.15cm} L{3.35cm} L{5.35cm} L{3.35cm} L{0.75cm}}
+\toprule
+\rowcolor{navy}
+\color{white}\bfseries Provider &
+\color{white}\bfseries Path / form &
+\color{white}\bfseries Current progress &
+\color{white}\bfseries Provisional target &
+\color{white}\bfseries Next action &
+\color{white}\bfseries Operational status &
+\color{white}\bfseries Owner \\
+\midrule
+\endfirsthead
+\toprule
+\rowcolor{navy}
+\color{white}\bfseries Provider &
+\color{white}\bfseries Path / form &
+\color{white}\bfseries Current progress &
+\color{white}\bfseries Provisional target &
+\color{white}\bfseries Next action &
+\color{white}\bfseries Operational status &
+\color{white}\bfseries Owner \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+
+Google Street View & sv-map Google overlay; raster PNG & Global z5 discovery complete; 63,728 positive z10 cells in the 13-source analysis. & z13 raster; z14 selected areas only. & Audit negative-grid recall, then freeze a bounded z13 inventory. & \status{green}{READY} / \status{amber}{LEVEL REVIEW} & --- \\
+Apple Look Around & LookMap layered raster, MVT and coverage JSON & Global z5 discovery complete; 20,646 positive z10 cells. Public-instance bulk use is not approved. & z12 MVT; z13 or z17 only where justified. & Confirm an authorized or self-hosted endpoint before a fine-scale run. & \status{red}{ACCESS-GATED} / \status{amber}{LEVEL REVIEW} & --- \\
+Baidu & Baidu-native raster with alpha-pixel reprojection & Corrected z10 discovery; 2,169 positive Web-z10 cells. Hong Kong and other Chinese cities rebuilt. & z13 raster; z14 focal cities. & Compare z13 and z14 road retention, then freeze the native-grid inventory. & \status{green}{READY} / \status{amber}{LEVEL REVIEW} & --- \\
+Tencent Street View & Local PMTiles archive; MVT lines & Archive decoded and integrated: 4,932,670 features from 10,303 decoded native-z12 tiles. & Native z12 archive. & Verify archive provenance and retain native geometry; no network reacquisition. & \status{green}{COMPLETE BASELINE} & --- \\
+Naver & Street-only \texttt{mt=ps} raster with dynamic frontend version & Complete Korea z14 inventory: 29,313 tiles, 25,289 non-empty; included in analysis. & z14 baseline; review z15. & Compare z14 and z15 across urban, rural and minor-road samples. & \status{green}{COMPLETE BASELINE} / \status{amber}{LEVEL REVIEW} & --- \\
+Kakao & \texttt{PNG\_RV02} raster on reversed Kakao native grid & Complete Korea L6 inventory: 27,190 tiles, 23,524 non-empty; included. & Native L6 baseline; review finer adjacent levels. & Compare L6 and finer native levels using common ground-resolution metrics. & \status{green}{COMPLETE BASELINE} / \status{amber}{LEVEL REVIEW} & --- \\
+KartaView & Sequence coverage raster PNG & Endpoint and zoom behaviour validated; no complete bounded inventory; not included in the 13-source analysis. & z13 candidate. & Define candidate scope, then compare z13 with finer supported levels. & \status{amber}{PILOT ONLY} / \status{amber}{SCOPE + LEVEL REVIEW} & --- \\
+Mapillary & Public overview, sequence and image MVT layers & z5 overview discovery complete: 708,399 overview points and 48,882 positive z10 cells included. & z10 sequence; z11 higher-fidelity candidate. & Move zoom-aware layer routing into the shared library and test z10 versus z11. & \status{green}{READY} / \status{amber}{LEVEL REVIEW} & --- \\
+Streetview.vn & \texttt{sequences} MVT lines & Vietnam z8 discovery complete: 47,901 features from 78 tiles; included. & z11 sequence MVT. & Compare adjacent levels and prepare the full Vietnam bounded job. & \status{green}{READY} / \status{amber}{LEVEL REVIEW} & --- \\
+Yandex & Street-view raster on Yandex elliptic-Mercator grid & Discovery and HTTP 204 audit complete; 2,647 positive z10 cells included. & z13 raster; z14 local option. & Rebuild persisted empty-state artifacts offline, then review z13 versus z14. & \status{green}{READY} / \status{amber}{LEVEL REVIEW} & --- \\
+Mappls RealView & Authorized Web Maps SDK capture; line coverage & India z10 capture complete with audited boundary waivers; 2,396 positive cells included. & z13 capture. & Run a deterministic negative-grid audit before choosing filtered or full-scope z13. & \status{red}{ACCESS-GATED} / \status{amber}{LEVEL REVIEW} & --- \\
+MapJack & \texttt{dots\_r5} alpha GIF coverage raster & Chiang Mai endpoint and pilot behaviour validated; no full bounded run; not included. & z16 candidate. & Confirm service scope, compare adjacent levels and define a low-rate bounded job. & \status{amber}{PILOT ONLY} / \status{amber}{LEVEL REVIEW} & --- \\
+Barikoi ThirdEye360 & \texttt{ThirdEye360} point MVT & z14 and z16 pilot decoding succeeded; service polygons not frozen; not included. & z14 candidate. & Freeze supported city polygons and test point-count stability across levels. & \status{amber}{PILOT ONLY} / \status{amber}{SCOPE + LEVEL REVIEW} & --- \\
+Panoramax & Local GeoParquet point export; optional MVT fallback & 115,998,261-point local projection acquired and integrated; 20,261 occupied z10 cells. & Native points; no routine tile zoom. & Reconstruct trajectories from collection, links and time fields before tile fallback. & \status{green}{COMPLETE BASELINE} & --- \\
+Mapilio & \texttt{map\_roads\_line} MVT with non-standard path order & Global z6 recovery closed at zero unresolved; 2,786 positive z10 cells included. & z10 MVT candidate. & Validate local geometry retention and build the positive-cell bounded queue. & \status{green}{READY} / \status{amber}{LEVEL REVIEW} & --- \\
+Mapy.com & Panorama-line raster with redirect-based transparent empty tiles & Complete Czechia z14 inventory: 33,663 tiles, 29,424 non-empty; included. & z14 baseline; review finer adjacent levels. & Compare z14 with finer levels across urban, rural and boundary samples. & \status{green}{COMPLETE BASELINE} / \status{amber}{LEVEL REVIEW} & --- \\
+\end{longtable}
+
+\vspace{1mm}
+\begin{minipage}[t]{0.49\textwidth}
+\small\textbf{Status vocabulary}\\[-1mm]
+\footnotesize
+\textbf{COMPLETE BASELINE}: current baseline is acquired and usable.\quad
+\textbf{READY}: implementation is available and the next job can be prepared.\quad
+\textbf{PILOT ONLY}: only local or case-level acquisition is validated.
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\textwidth}
+\small\textbf{Review gates}\\[-1mm]
+\footnotesize
+\textbf{ACCESS-GATED}: production acquisition requires authorized access.\quad
+\textbf{LEVEL REVIEW}: target resolution must be rechecked.\quad
+\textbf{SCOPE REVIEW}: service or candidate extent must be frozen first.
+\end{minipage}
+
+\vfill
+\footnotesize\color{muted}
+Canonical editable status: \texttt{docs/provider\_acquisition\_status.md}. The PDF is generated from the adjacent \texttt{.tex} source with XeLaTeX.
+\end{document}

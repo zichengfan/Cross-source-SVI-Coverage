@@ -2,6 +2,9 @@
 
 Last updated: 2026-08-16
 
+Print-friendly version: [provider_acquisition_status.pdf](provider_acquisition_status.pdf)
+(reproducible source: [provider_acquisition_status.tex](provider_acquisition_status.tex)).
+
 This table is the operational source of truth for the 16 implemented coverage
 acquisition paths. It distinguishes implementation, acquired data and the next
 fine-scale decision. Target levels remain provisional until cross-level review
